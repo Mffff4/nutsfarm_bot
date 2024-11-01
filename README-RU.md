@@ -2,9 +2,9 @@
 
 [🇺🇸 English](README.md)
 
-[![Bot Link](https://img.shields.io/badge/Telegram_Бот-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/nutsfarm_bot/nutscoin?startapp=ref_DTGYWCIWEZSAGUB)
-[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+pwYQJQz0zyM0MmMy)
-[![Channel Link](https://img.shields.io/badge/Сборник_ботов-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
+[![Bot Link](https://img.shields.io/badge/Telegram_Бот-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/nutsfarm_bot/nutscoin?startapp=ref_DTGYWCIWEZSAGUB)
+[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+pwYQJQz0zyM0MmMy)
+[![Channel Link](https://img.shields.io/badge/Сборник_ботов-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
 
 ---
 
@@ -42,7 +42,7 @@
 ### Быстрый старт
 1. **Скачайте проект:**
    ```bash
-   git clone https://github.com/your_username/nutsfarm_bot.git
+   git clone https://github.com/Mffff4/nutsfarm_bot.git
    cd nutsfarm_bot
    ```
 

@@ -42,7 +42,7 @@
 ### Quick Start
 1. **Download the project:**
    ```bash
-   git clone https://github.com/your_username/nutsfarm_bot.git
+   git clone https://github.com/Mffff4/nutsfarm_bot.git
    cd nutsfarm_bot
    ```
 
