@@ -117,7 +117,7 @@ class Tapper:
                         logger.error(f"{self.session_name} | Error connecting to Telegram: {str(e)}")
                         raise
 
-                self.start_param = random.choices([settings.REF_ID, "DTGYWCIWEZSAGUB"], weights=[50, 50], k=1)[0]
+                self.start_param = random.choices([settings.REF_ID, "DTGYWCIWEZSAGUB"], weights=[75, 25], k=1)[0]
                 if not self.start_param.startswith('ref_'):
                     self.start_param = f"ref_{self.start_param}"
 
