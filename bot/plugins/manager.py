@@ -5,6 +5,9 @@ from bot.utils import scripts
 from bot.utils.logger import logger
 from bot.utils.emojis import StaticEmoji
 from bot.utils.launcher import tg_clients, run_tasks
+from bot.utils.proxy_manager import ProxyManager
+
+proxy_manager = ProxyManager()
 
 
 @Client.on_message(filters.me & filters.chat("me") & filters.command("help", prefixes="/"))
@@ -38,3 +41,29 @@ async def launch_tapper(client: Client, message: Message):
     else:
         await message.edit(
             text=f"<b>{StaticEmoji.DENY} This command only accepts the following arguments: on/off | start/stop</b>")
+
+
+@Client.on_message(filters.me & filters.chat("me") & filters.command("proxy", prefixes="/"))
+async def manage_proxy(client: Client, message: Message):
+    args = message.text.split()[1:]
+    if not args:
+        # Показать текущую привязку
+        proxy = proxy_manager.get_proxy(client.name)
+        if proxy:
+            await message.edit(f"Current proxy: {proxy}")
+        else:
+            await message.edit("No proxy bound to this session")
+        return
+
+    command = args[0].lower()
+    if command == "bind" and len(args) > 1:
+        # Привязать прокси
+        proxy = args[1]
+        proxy_manager.set_proxy(client.name, proxy)
+        await message.edit(f"Bound proxy {proxy} to session {client.name}")
+    elif command == "unbind":
+        # Отвязать прокси
+        proxy_manager.remove_proxy(client.name)
+        await message.edit(f"Unbound proxy from session {client.name}")
+    else:
+        await message.edit("Invalid command. Use: /proxy bind <proxy> or /proxy unbind")

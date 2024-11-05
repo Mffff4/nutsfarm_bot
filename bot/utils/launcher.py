@@ -14,6 +14,7 @@ from bot.utils import logger
 from bot.utils.web import run_web_and_tunnel, stop_web_and_tunnel
 from bot.core.tapper import run_tappers
 from bot.core.registrator import register_sessions  
+from bot.utils.proxy_manager import ProxyManager
 
 from colorama import Fore, Style, init
 
@@ -62,6 +63,8 @@ global tg_clients
 
 shutdown_event = asyncio.Event()
 
+proxy_manager = ProxyManager()
+
 def get_session_names() -> list[str]:
     session_names = glob.glob("sessions/*.session")
     session_names = [
@@ -69,14 +72,16 @@ def get_session_names() -> list[str]:
     ]
     return session_names
 
-def get_proxies() -> list[Proxy]:
+def get_proxies() -> list[str]:
     if settings.USE_PROXY_FROM_FILE:
         with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
-            proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file]
-    else:
-        proxies = []
-
-    return proxies
+            proxies = []
+            for row in file:
+                proxy = row.strip()
+                if proxy:
+                    proxies.append(proxy)
+            return proxies
+    return []
 
 async def get_tg_clients() -> list[Client]:
     global tg_clients
@@ -174,8 +179,20 @@ async def process() -> None:
 
 async def run_tasks(tg_clients: list[Client]):
     proxies = get_proxies()
-    proxies_cycle = cycle(proxies) if proxies else None
-    proxies_list = [next(proxies_cycle) if proxies_cycle else None for _ in tg_clients]
+    proxies_list = []
+    
+    for client in tg_clients:
+        bound_proxy = proxy_manager.get_proxy(client.name)
+        if bound_proxy:
+            proxies_list.append(bound_proxy)
+        else:
+            if proxies:
+                proxy = proxies.pop(0)
+                proxy_manager.set_proxy(client.name, proxy)
+                proxies_list.append(proxy)
+                proxies.append(proxy)
+            else:
+                proxies_list.append(None)
     
     await run_tappers(tg_clients, proxies_list)
 
