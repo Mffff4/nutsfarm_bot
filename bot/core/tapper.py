@@ -189,6 +189,12 @@ class Tapper:
                         timeout=ClientTimeout(total=timeout),
                         **kwargs
                     ) as response:
+                        if response.status == 429: 
+                            retry_after = int(response.headers.get('Retry-After', 60))
+                            logger.warning(f"{self.session_name} | Rate limit exceeded, waiting {retry_after} seconds")
+                            await asyncio.sleep(retry_after)
+                            continue
+                            
                         response.raise_for_status()
                         
                         if response.status == 204:
@@ -221,6 +227,12 @@ class Tapper:
                                         return text
                         
             except ClientResponseError as error:
+                if error.status == 429:  
+                    retry_after = int(error.headers.get('Retry-After', 60))
+                    logger.warning(f"{self.session_name} | Rate limit exceeded, waiting {retry_after} seconds")
+                    await asyncio.sleep(retry_after)
+                    continue
+                    
                 retry_count += 1
                 if retry_count < settings.MAX_RETRIES:
                     delay = random.uniform(settings.RETRY_DELAY[0], settings.RETRY_DELAY[1])
@@ -456,6 +468,8 @@ class Tapper:
             f"Reward: {reward}"
         )
 
+        await asyncio.sleep(random.uniform(5, 10))
+
         current_tasks = await self.get_current_tasks()
         if current_tasks:
             for current_task in current_tasks:
@@ -509,7 +523,7 @@ class Tapper:
             logger.error(f"{self.session_name} | Failed to start task")
             return False
             
-        await asyncio.sleep(random.uniform(2, 4))
+        await asyncio.sleep(random.uniform(5, 8))
 
         if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
             channel_id = task['telegramChannelId']
@@ -527,7 +541,7 @@ class Tapper:
                         
         max_attempts = 10
         for attempt in range(max_attempts):
-            await asyncio.sleep(random.uniform(3, 5))
+            await asyncio.sleep(random.uniform(5, 8)) 
             current_tasks = await self.get_current_tasks()
             if current_tasks:
                 for current_task in current_tasks:
