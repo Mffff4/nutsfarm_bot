@@ -291,6 +291,9 @@ class Tapper:
         filtered_tasks = []
         tasks_to_complete = 0
         
+        # Получаем количество рефералов один раз для всех заданий
+        referrals_count = None
+        
         for task in tasks:
             task_info = task['task']
             task_type = task_info['type']
@@ -320,7 +323,10 @@ class Tapper:
                     
                 tasks_to_complete += 1
                 channel_id = task.get('telegramChannelId')
-                task_type_str = "Channel subscription" if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION' else "URL"
+                task_type_str = {
+                    'TELEGRAM_CHANNEL_SUBSCRIPTION': "Channel subscription",
+                    'URL': "URL"
+                }.get(task_type, task_type)
                 
                 logger.info(
                     f"{self.session_name} | "
@@ -331,6 +337,32 @@ class Tapper:
                     f"✅ Added to queue"
                 )
                 filtered_tasks.append(task)
+            elif task_type == 'RECRUIT_REFERRALS':
+                if referrals_count is None:
+                    referrals_count = await self.get_referrals_count() or 0
+                    
+                try:
+                    required_refs = int(''.join(filter(str.isdigit, title)))
+                    if referrals_count >= required_refs:
+                        tasks_to_complete += 1
+                        logger.info(
+                            f"{self.session_name} | "
+                            f"Task: {title} | "
+                            f"Type: Referral task | "
+                            f"Reward: {reward} | "
+                            f"✅ Added to queue (have {referrals_count}/{required_refs} referrals)"
+                        )
+                        filtered_tasks.append(task)
+                    else:
+                        logger.info(
+                            f"{self.session_name} | "
+                            f"Task: {title} | "
+                            f"Type: Referral task | "
+                            f"Reward: {reward} | "
+                            f"⚠️ Skipped (have {referrals_count}/{required_refs} referrals)"
+                        )
+                except ValueError:
+                    logger.error(f"{self.session_name} | Failed to parse required referrals count from title: {title}")
             else:
                 logger.info(
                     f"{self.session_name} | "
@@ -467,9 +499,41 @@ class Tapper:
             f"Type: {task_type} | "
             f"Reward: {reward}"
         )
-
+        if task_type == 'RECRUIT_REFERRALS':
+            try:
+                required_refs = int(''.join(filter(str.isdigit, title)))
+                current_refs = await self.get_referrals_count()
+                if current_refs is None:
+                    logger.error(f"{self.session_name} | Failed to get referrals count")
+                    return False
+                if current_refs >= required_refs:
+                    logger.info(f"{self.session_name} | Have enough referrals ({current_refs}/{required_refs})")
+                    completion_id = await self.start_task(task_id, task_type)
+                    if not completion_id:
+                        logger.error(f"{self.session_name} | Failed to start referral task")
+                        return False
+                    await asyncio.sleep(random.uniform(2, 4))
+                    max_attempts = 10
+                    for attempt in range(max_attempts):
+                        current_tasks = await self.get_current_tasks()
+                        if current_tasks:
+                            for current_task in current_tasks:
+                                if current_task['id'] == completion_id:
+                                    if current_task['status'] == 'COMPLETED':
+                                        logger.success(f"{self.session_name} | Referral task completed, claiming reward")
+                                        received_reward = await self.claim_task_reward(completion_id)
+                                        return received_reward > 0
+                                    logger.info(f"{self.session_name} | Task status: {current_task['status']}, waiting...")
+                        await asyncio.sleep(random.uniform(3, 5))
+                    logger.error(f"{self.session_name} | Task completion timeout exceeded")
+                    return False
+                else:
+                    logger.info(f"{self.session_name} | Not enough referrals ({current_refs}/{required_refs})")
+                    return False
+            except ValueError:
+                logger.error(f"{self.session_name} | Failed to parse required referrals count from title: {title}")
+                return False
         await asyncio.sleep(random.uniform(5, 10))
-
         current_tasks = await self.get_current_tasks()
         if current_tasks:
             for current_task in current_tasks:
@@ -866,6 +930,67 @@ class Tapper:
         if total_reward > 0:
             logger.info(f"{self.session_name} | Total story rewards: {total_reward}")
 
+    async def get_referral_reward_amount(self) -> float | None:
+        result = await self._make_request('GET', 'user/current/referrals/amount')
+        if isinstance(result, (int, float)):
+            logger.info(f"{self.session_name} | Available referral reward: {result}")
+            return float(result)
+        return None
+    
+    async def get_referral_claim_time(self) -> datetime | None:
+        result = await self._make_request('GET', 'user/current/referrals/time')
+        if isinstance(result, str):
+            try:
+                claim_time = datetime.fromisoformat(result.replace('Z', '+00:00'))
+                logger.info(f"{self.session_name} | Referral reward claim time: {claim_time}")
+                return claim_time
+            except ValueError:
+                logger.error(f"{self.session_name} | Invalid claim time format: {result}")
+        return None
+    
+    async def claim_referral_reward(self) -> float | None:
+        result = await self._make_request('POST', 'user/current/referrals/claim', headers={'Origin': settings.BASE_URL})
+        if isinstance(result, (int, float)):
+            logger.success(f"{self.session_name} | Referral reward claimed: {result}")
+            return float(result)
+        return None
+    
+    async def check_and_claim_referral_reward(self) -> bool:
+        try:
+            reward_amount = await self.get_referral_reward_amount()
+            if not reward_amount or reward_amount <= 0:
+                logger.info(f"{self.session_name} | No referral reward available")
+                return False
+            claim_time = await self.get_referral_claim_time()
+            if not claim_time:
+                return False
+            current_time = datetime.now(timezone.utc)
+            if current_time < claim_time:
+                time_left = (claim_time - current_time).total_seconds()
+                hours = int(time_left // 3600)
+                minutes = int((time_left % 3600) // 60)
+                logger.info(f"{self.session_name} | Referral reward will be available in {hours}h {minutes}m")
+                return False
+            claimed_amount = await self.claim_referral_reward()
+            return claimed_amount is not None and claimed_amount > 0
+        except Exception as e:
+            logger.error(f"{self.session_name} | Error checking referral reward: {str(e)}")
+            return False
+
+    async def get_referrals_count(self) -> int | None:
+        result = await self._make_request(
+            'GET',
+            'user/current/referrals',
+            params={'page': 1, 'size': 1}
+        )
+        
+        if isinstance(result, dict):
+            total = result.get('total')
+            if total is not None:
+                logger.info(f"{self.session_name} | Total referrals: {total}")
+                return int(total)
+        return None
+
 async def run_tappers(tg_clients: list[Client], proxies: list[str | None]):
     session_sleep_times = {}
     active_sessions = set()
@@ -922,6 +1047,9 @@ async def run_tappers(tg_clients: list[Client], proxies: list[str | None]):
                     
                     if await tapper.check_and_claim_streak():
                         logger.success(f"{tapper.session_name} | Streak reward claimed")
+
+                    if await tapper.check_and_claim_referral_reward():
+                        logger.success(f"{tapper.session_name} | Referral reward claimed")
 
                     await tapper.process_stories()
                     
