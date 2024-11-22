@@ -291,7 +291,6 @@ class Tapper:
         filtered_tasks = []
         tasks_to_complete = 0
         
-        # Получаем количество рефералов один раз для всех заданий
         referrals_count = None
         
         for task in tasks:
@@ -426,6 +425,16 @@ class Tapper:
                 await self.tg_client.connect()
 
             try:
+                if 'short.trustwallet.com' in channel_url or ('t.me/' not in channel_url and 'telegram.me/' not in channel_url):
+                    async with ClientSession() as session:
+                        async with session.get(channel_url, allow_redirects=True, ssl=False) as response:
+                            if response.status == 200:
+                                text = await response.text()
+                                if 'tg://resolve?domain=' in text:
+                                    channel_username = text.split('tg://resolve?domain=')[1].split('"')[0]
+                                    logger.info(f"{self.session_name} | Found Telegram channel: {channel_username}")
+                                    channel_url = f"https://t.me/{channel_username}"
+            
                 channel_username = channel_url.split('/')[-1]
                 
                 try:
@@ -499,6 +508,30 @@ class Tapper:
             f"Type: {task_type} | "
             f"Reward: {reward}"
         )
+        
+        if task_type == 'URL':
+            url = task.get('link')
+            if not url:
+                logger.error(f"{self.session_name} | URL task missing link")
+                return False
+            
+            if 'short.trustwallet.com' in url or 't.me/' in url:
+                try:
+                    async with ClientSession() as session:
+                        async with session.get(url, allow_redirects=True, ssl=False) as response:
+                            if response.status == 200:
+                                text = await response.text()
+                                if 'tg://resolve?domain=' in text:
+                                    channel_username = text.split('tg://resolve?domain=')[1].split('"')[0]
+                                    logger.info(f"{self.session_name} | Found Telegram channel: {channel_username}")
+                                    
+                                    if not await self.join_telegram_channel(None, f"https://t.me/{channel_username}"):
+                                        logger.error(f"{self.session_name} | Failed to join channel {channel_username}")
+                                        return False
+                except Exception as e:
+                    logger.error(f"{self.session_name} | Error processing URL task: {str(e)}")
+                    return False
+
         if task_type == 'RECRUIT_REFERRALS':
             try:
                 required_refs = int(''.join(filter(str.isdigit, title)))
@@ -831,7 +864,6 @@ class Tapper:
         return False
 
     async def get_farming_status(self) -> dict | None:
-        """Получает статус фарминга и время до его окончания"""
         status = await self._make_request('GET', 'farming/current')
         if not status:
             return None
@@ -886,15 +918,12 @@ class Tapper:
         return False
 
     async def get_active_stories(self) -> list | None:
-        """Получает список всех доступных историй"""
         return await self._make_request('GET', 'story/active')
 
     async def get_current_stories(self) -> list | None:
-        """Получает список текущих историй пользователя"""
         return await self._make_request('GET', 'story/current')
 
     async def read_story(self, story_id: str) -> int | None:
-        """Отмечает историю как прочитанную и получает награду"""
         result = await self._make_request(
             'POST',
             f'story/read/{story_id}',
@@ -907,7 +936,6 @@ class Tapper:
         return None
 
     async def process_stories(self) -> None:
-        """Обрабатывает все доступные истории"""
         active_stories = await self.get_active_stories()
         if not active_stories:
             return
