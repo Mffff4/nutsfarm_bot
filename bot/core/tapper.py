@@ -469,30 +469,43 @@ class Tapper:
 
     async def _mute_and_archive_channel(self, channel_id: int) -> None:
         try:
-            await self.tg_client.invoke(
-                raw.functions.account.UpdateNotifySettings(
-                    peer=raw.types.InputNotifyPeer(
-                        peer=await self.tg_client.resolve_peer(channel_id)
-                    ),
-                    settings=raw.types.InputPeerNotifySettings(
-                        mute_until=2147483647
+            try:
+                await self.tg_client.invoke(
+                    raw.functions.account.UpdateNotifySettings(
+                        peer=raw.types.InputNotifyPeer(
+                            peer=await self.tg_client.resolve_peer(channel_id)
+                        ),
+                        settings=raw.types.InputPeerNotifySettings(
+                            mute_until=2147483647
+                        )
                     )
                 )
-            )
-            logger.info(f"{self.session_name} | Notifications disabled")
+                logger.info(f"{self.session_name} | Notifications disabled")
+            except RPCError as e:
+                if "CHANNEL_PRIVATE" in str(e):
+                    logger.info(f"{self.session_name} | Cannot configure notifications for private channel")
+                else:
+                    logger.warning(f"{self.session_name} | Error while configuring notifications: {str(e)}")
 
-            await self.tg_client.invoke(
-                raw.functions.folders.EditPeerFolders(
-                    folder_peers=[
-                        raw.types.InputFolderPeer(
-                            peer=await self.tg_client.resolve_peer(channel_id),
-                            folder_id=1
-                        )
-                    ]
+            try:
+                await self.tg_client.invoke(
+                    raw.functions.folders.EditPeerFolders(
+                        folder_peers=[
+                            raw.types.InputFolderPeer(
+                                peer=await self.tg_client.resolve_peer(channel_id),
+                                folder_id=1
+                            )
+                        ]
+                    )
                 )
-            )
-            logger.info(f"{self.session_name} | Channel added to archive")
-        except RPCError as e:
+                logger.info(f"{self.session_name} | Channel added to archive")
+            except RPCError as e:
+                if "CHANNEL_PRIVATE" in str(e):
+                    logger.info(f"{self.session_name} | Cannot archive private channel")
+                else:
+                    logger.warning(f"{self.session_name} | Error while archiving channel: {str(e)}")
+
+        except Exception as e:
             logger.warning(f"{self.session_name} | Error while configuring channel: {str(e)}")
 
     async def complete_task(self, task: dict) -> bool:
