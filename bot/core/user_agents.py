@@ -42,7 +42,9 @@ def generate_android_user_agent():
     return f'Mozilla/5.0 (Linux; Android {android_version}; {device} Build/{build}) Chrome/{chrome_version} Mobile'
 
 def load_or_generate_user_agent(session_name: str) -> str:
-    ua_file = 'user_agents.json'
+    ua_file = os.path.join('sessions', 'user_agents.json')
+    os.makedirs('sessions', exist_ok=True)
+    
     try:
         if os.path.exists(ua_file):
             with open(ua_file, 'r') as f:
