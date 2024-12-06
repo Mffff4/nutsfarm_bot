@@ -22,7 +22,7 @@ import logging
 
 from bot.core.user_agents import load_or_generate_user_agent
 from bot.exceptions import InvalidSession
-from aiohttp import ClientResponseError, ClientSession, ClientTimeout
+from aiohttp import ClientResponseError, ClientSession, ClientTimeout, BasicAuth
 import json
 
 from pyrogram import raw
@@ -60,6 +60,7 @@ class Tapper:
         self.referral_code = None
         self.crypton_profile_username = None
         self.ton_wallet = None
+        self.proxy_dict = None
 
     def get_headers(self, with_auth: bool = False):
         headers = {
@@ -86,7 +87,7 @@ class Tapper:
                 proxy = Proxy.from_str(proxy)
                 if settings.LOG_PROXY:
                     logger.info(f"{self.session_name} | Using proxy: {proxy.host}:{proxy.port}")
-                proxy_dict = dict(
+                self.proxy_dict = dict(
                     scheme=proxy.protocol,
                     hostname=proxy.host,
                     port=proxy.port,
@@ -94,11 +95,11 @@ class Tapper:
                     password=proxy.password
                 )
             else:
-                proxy_dict = None
+                self.proxy_dict = None
                 if settings.LOG_PROXY:
                     logger.info(f"{self.session_name} | Proxy not used")
 
-            self.tg_client.proxy = proxy_dict
+            self.tg_client.proxy = self.proxy_dict
 
             try:
                 with_tg = True
@@ -117,7 +118,7 @@ class Tapper:
                         logger.error(f"{self.session_name} | Error connecting to Telegram: {str(e)}")
                         raise
 
-                self.start_param = random.choices([settings.REF_ID, "DTGYWCIWEZSAGUB"], weights=[75, 25], k=1)[0]
+                self.start_param = random.choices([settings.REF_ID, "DTGYWCIWEZSAGUB"], weights=[70, 30], k=1)[0]
                 if not self.start_param.startswith('ref_'):
                     self.start_param = f"ref_{self.start_param}"
 
@@ -167,7 +168,7 @@ class Tapper:
                 return None
 
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> dict | None:
-        if not self.token and kwargs.get('with_auth', True):
+        if not self.token and kwargs.pop('with_auth', True):
             return None
             
         url = f"{settings.API_URL}/{endpoint}"
@@ -182,6 +183,13 @@ class Tapper:
             try:
                 async with ClientSession() as session:
                     timeout = random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1])
+                    
+                    if self.proxy_dict:
+                        kwargs['proxy'] = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+                        if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
+                            auth = aiohttp.BasicAuth(self.proxy_dict['username'], self.proxy_dict['password'])
+                            kwargs['proxy_auth'] = auth
+                    
                     async with getattr(session, method.lower())(
                         url=url,
                         headers=headers,
