@@ -14,4 +14,4 @@ RUN mkdir -p sessions
 ENV PYTHONIOENCODING=utf-8
 ENV TERM=xterm-256color
 
-CMD ["python", "main.py", "-a", "3"]
+CMD ["python", "main.py", "-a", "1"]

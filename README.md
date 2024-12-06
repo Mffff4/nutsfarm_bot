@@ -61,7 +61,7 @@
 
 4. **Run the bot:**
    ```bash
-   python main.py -a 3  # Start the bot
+   python main.py -a 1  # Start the bot
    ```
 
 ### Manual Installation

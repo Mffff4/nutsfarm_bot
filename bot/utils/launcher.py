@@ -51,9 +51,9 @@ start_text = f"""
 {Style.RESET_ALL}
 {Fore.YELLOW}Select action:{Style.RESET_ALL}
 
-    {Fore.GREEN}1. Create session{Style.RESET_ALL}
-    {Fore.GREEN}2. Create session via QR{Style.RESET_ALL}
-    {Fore.GREEN}3. Launch clicker{Style.RESET_ALL}
+    {Fore.GREEN}1. Launch clicker{Style.RESET_ALL}
+    {Fore.GREEN}2. Create session{Style.RESET_ALL}
+    {Fore.GREEN}3. Create session via QR{Style.RESET_ALL}
     {Fore.GREEN}4. Upload sessions via web (BETA){Style.RESET_ALL}
 
 {Fore.CYAN}Developed by: @Mffff4{Style.RESET_ALL}
@@ -133,22 +133,15 @@ async def process() -> None:
                 break
 
     if action == 1:
-        await register_sessions()
-    elif action == 2:
-        session_name = input("Enter the session name for QR code authentication: ")
-        print("Initializing QR code authentication...")
-        subprocess.run(["python", "-m", "bot.utils.loginQR", "-s", session_name])
-        print("QR code authentication was successful!")
-    elif action == 3:
         tg_clients = await get_tg_clients()
         if not tg_clients:
             print("No sessions found. You can create sessions using the following methods:")
-            print("1. By phone number: python main.py -a 1")
-            print("2. By QR code: python main.py -a 2")
+            print("1. By phone number: python main.py -a 2")
+            print("2. By QR code: python main.py -a 3")
             print("3. Upload via web interface (BETA): python main.py -a 4")
             print("\nIf you're using Docker, use these commands:")
-            print("1. By phone number: docker compose run bot python3 main.py -a 1")
-            print("2. By QR code: docker compose run bot python3 main.py -a 2")
+            print("1. By phone number: docker compose run bot python3 main.py -a 2")
+            print("2. By QR code: docker compose run bot python3 main.py -a 3")
             print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 4")
             return
             
@@ -169,6 +162,13 @@ async def process() -> None:
                     proxies_list.append(None)
                     
         await run_tasks(tg_clients=tg_clients, proxies=proxies_list)
+    elif action == 2:
+        await register_sessions()
+    elif action == 3:
+        session_name = input("Enter the session name for QR code authentication: ")
+        print("Initializing QR code authentication...")
+        subprocess.run(["python", "-m", "bot.utils.loginQR", "-s", session_name])
+        print("QR code authentication was successful!")
     elif action == 4:
         logger.info("Starting web interface for uploading sessions...")
         
