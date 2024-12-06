@@ -20,6 +20,7 @@ from pyrogram.raw import types
 from rich.console import Console
 import logging
 
+import aiohttp
 from bot.core.user_agents import load_or_generate_user_agent
 from bot.exceptions import InvalidSession
 from aiohttp import ClientResponseError, ClientSession, ClientTimeout, BasicAuth
