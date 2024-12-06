@@ -1,6 +1,6 @@
 FROM python:3.10.11-alpine3.18
 
-RUN apk add --no-cache gcc musl-dev libffi-dev python3-dev openssl-dev
+RUN apk add --no-cache gcc musl-dev libffi-dev python3-dev openssl-dev git
 
 WORKDIR /app
 
