@@ -5,6 +5,7 @@ import argparse
 from itertools import cycle
 import subprocess
 import signal
+import random
 
 from pyrogram import Client, compose
 from better_proxy import Proxy
@@ -189,13 +190,24 @@ async def run_tasks(tg_clients: list[Client], proxies: list[str | None]):
         update_task = None
         
     try:
+        tasks = []
+        for client, proxy in zip(tg_clients, proxies):
+            delay = random.uniform(0, 60)
+            logger.info(f"{client.name} | Will start in {delay:.1f} seconds")
+            
+            async def delayed_start(client, proxy, delay):
+                await asyncio.sleep(delay)
+                await run_tappers([client], [proxy])
+                
+            tasks.append(delayed_start(client, proxy, delay))
+        
         if update_task:
             await asyncio.gather(
                 update_task,
-                run_tappers(tg_clients, proxies)
+                *tasks
             )
         else:
-            await run_tappers(tg_clients, proxies)
+            await asyncio.gather(*tasks)
             
     except asyncio.CancelledError:
         if update_task:
