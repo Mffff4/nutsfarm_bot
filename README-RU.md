@@ -3,8 +3,7 @@
 [🇺🇸 English](README.md)
 
 [![Bot Link](https://img.shields.io/badge/Telegram_Бот-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/nutsfarm_bot/nutscoin?startapp=ref_DTGYWCIWEZSAGUB)
-[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+pwYQJQz0zyM0MmMy)
-[![Channel Link](https://img.shields.io/badge/Сборник_ботов-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
+[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+d0sLjg42kJgxZTM6)
 
 ---
 
@@ -95,6 +94,8 @@
 | **API_ID**                 |                      | ID приложения из my.telegram.org                         |
 | **API_HASH**               |                      | Хэш приложения из my.telegram.org                        |
 | **USE_PROXY_FROM_FILE**    | False                | Использовать прокси из файла                             |
+| **AUTO_UPDATE**            | True                 | Включить автоматические обновления                      |
+| **CHECK_UPDATE_INTERVAL**  | 300                  | Интервал проверки обновлений (сек)                     |
 | **REF_ID**                 | "DTGYWCIWEZSAGUB"    | Реферальный код для регистрации                          |
 | **ENABLE_CHANNEL_SUBSCRIPTIONS** | True           | Включить подписку на каналы                              |
 | **REQUEST_TIMEOUT**        | [30, 60]             | Таймаут запросов (мин, макс) в секундах                 |
@@ -110,7 +111,7 @@
 ## 📞 Контакты
 
 Если у вас возникли вопросы или предложения:
-- **Telegram**: [Присоединяйтесь к нашему каналу](https://t.me/+pwYQJQz0zyM0MmMy)
+- **Telegram**: [Присоединяйтесь к нашему каналу](https://t.me/+d0sLjg42kJgxZTM6)
 
 ---
 

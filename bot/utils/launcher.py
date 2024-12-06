@@ -15,6 +15,7 @@ from bot.utils.web import run_web_and_tunnel, stop_web_and_tunnel
 from bot.core.tapper import run_tappers
 from bot.core.registrator import register_sessions  
 from bot.utils.proxy_manager import ProxyManager
+from bot.utils.updater import UpdateManager
 
 from colorama import Fore, Style, init
 
@@ -52,11 +53,10 @@ start_text = f"""
     {Fore.GREEN}1. Create session{Style.RESET_ALL}
     {Fore.GREEN}2. Create session via QR{Style.RESET_ALL}
     {Fore.GREEN}3. Launch clicker{Style.RESET_ALL}
-    {Fore.GREEN}4. Launch via Telegram (Beta){Style.RESET_ALL}
-    {Fore.GREEN}5. Upload sessions via web (BETA){Style.RESET_ALL}
+    {Fore.GREEN}4. Upload sessions via web (BETA){Style.RESET_ALL}
 
 {Fore.CYAN}Developed by: @Mffff4{Style.RESET_ALL}
-{Fore.CYAN}Our Telegram channel: {Fore.BLUE}https://t.me/+l3roJWT9aRNkMjUy{Style.RESET_ALL}
+{Fore.CYAN}Our Telegram channel: {Fore.BLUE}https://t.me/+d0sLjg42kJgxZTM6{Style.RESET_ALL}
 """
 
 global tg_clients
@@ -111,6 +111,7 @@ async def get_tg_clients() -> list[Client]:
 async def process() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
+    parser.add_argument("--update-restart", action="store_true", help="Indicates if the process was restarted after update")
 
     logger.info(f"Detected {len(get_session_names())} sessions | {len(get_proxies())} proxies")
 
@@ -124,8 +125,8 @@ async def process() -> None:
 
             if not action.isdigit():
                 logger.warning("Action must be a number")
-            elif action not in ["1", "2", "3", "4", "5"]:
-                logger.warning("Action must be 1, 2, 3, 4, or 5")
+            elif action not in ["1", "2", "3", "4"]:
+                logger.warning("Action must be 1, 2, 3, or 4")
             else:
                 action = int(action)
                 break
@@ -143,28 +144,31 @@ async def process() -> None:
             print("No sessions found. You can create sessions using the following methods:")
             print("1. By phone number: python main.py -a 1")
             print("2. By QR code: python main.py -a 2")
-            print("3. Upload via web interface (BETA): python main.py -a 5")
+            print("3. Upload via web interface (BETA): python main.py -a 4")
             print("\nIf you're using Docker, use these commands:")
             print("1. By phone number: docker compose run bot python3 main.py -a 1")
             print("2. By QR code: docker compose run bot python3 main.py -a 2")
-            print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 5")
+            print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 4")
             return
-        await run_tasks(tg_clients=tg_clients)
+            
+        proxies = get_proxies()
+        proxies_list = []
+        
+        for client in tg_clients:
+            bound_proxy = proxy_manager.get_proxy(client.name)
+            if bound_proxy:
+                proxies_list.append(bound_proxy)
+            else:
+                if proxies:
+                    proxy = proxies.pop(0)
+                    proxy_manager.set_proxy(client.name, proxy)
+                    proxies_list.append(proxy)
+                    proxies.append(proxy)
+                else:
+                    proxies_list.append(None)
+                    
+        await run_tasks(tg_clients=tg_clients, proxies=proxies_list)
     elif action == 4:
-        tg_clients = await get_tg_clients()
-        if not tg_clients:
-            print("No sessions found. You can create sessions using the following methods:")
-            print("1. By phone number: python main.py -a 1")
-            print("2. By QR code: python main.py -a 2")
-            print("3. Upload via web interface (BETA): python main.py -a 5")
-            print("\nIf you're using Docker, use these commands:")
-            print("1. By phone number: docker compose run bot python3 main.py -a 1")
-            print("2. By QR code: docker compose run bot python3 main.py -a 2")
-            print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 5")
-            return
-        logger.info("Send /help command in Saved Messages\n")
-        await compose(tg_clients)
-    elif action == 5:
         logger.info("Starting web interface for uploading sessions...")
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -177,24 +181,31 @@ async def process() -> None:
             await stop_web_and_tunnel()
             print("Program terminated.")
 
-async def run_tasks(tg_clients: list[Client]):
-    proxies = get_proxies()
-    proxies_list = []
-    
-    for client in tg_clients:
-        bound_proxy = proxy_manager.get_proxy(client.name)
-        if bound_proxy:
-            proxies_list.append(bound_proxy)
+async def run_tasks(tg_clients: list[Client], proxies: list[str | None]):
+    if settings.AUTO_UPDATE:
+        update_manager = UpdateManager()
+        update_task = asyncio.create_task(update_manager.run())
+    else:
+        update_task = None
+        
+    try:
+        if update_task:
+            await asyncio.gather(
+                update_task,
+                run_tappers(tg_clients, proxies)
+            )
         else:
-            if proxies:
-                proxy = proxies.pop(0)
-                proxy_manager.set_proxy(client.name, proxy)
-                proxies_list.append(proxy)
-                proxies.append(proxy)
-            else:
-                proxies_list.append(None)
-    
-    await run_tappers(tg_clients, proxies_list)
+            await run_tappers(tg_clients, proxies)
+            
+    except asyncio.CancelledError:
+        if update_task:
+            update_task.cancel()
+        raise
+    except Exception as e:
+        logger.error(f"Error in run_tasks: {str(e)}")
+        if update_task:
+            update_task.cancel()
+        raise
 
 def signal_handler(signum, frame):
     print("\nShutting down...")

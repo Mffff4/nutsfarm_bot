@@ -3,8 +3,7 @@
 [🇷🇺 Русский](README-RU.md)
 
 [![Bot Link](https://img.shields.io/badge/Telegram_Bot-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/nutsfarm_bot/nutscoin?startapp=ref_DTGYWCIWEZSAGUB)
-[![Channel Link](https://img.shields.io/badge/Telegram_Channel-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+pwYQJQz0zyM0MmMy)
-[![Channel Link](https://img.shields.io/badge/Bot_Collection-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
+[![Channel Link](https://img.shields.io/badge/Telegram_Channel-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+d0sLjg42kJgxZTM6)
 
 ---
 
@@ -95,6 +94,8 @@
 | **API_ID**                 |                      | Application ID from my.telegram.org                      |
 | **API_HASH**               |                      | Application hash from my.telegram.org                    |
 | **USE_PROXY_FROM_FILE**    | False                | Use proxy from file                                     |
+| **AUTO_UPDATE**           | True                 | Enable automatic updates                                   |
+| **CHECK_UPDATE_INTERVAL**  | 300                  | Update check interval (sec)                         |
 | **REF_ID**                 | "DTGYWCIWEZSAGUB"    | Referral code for registration                          |
 | **ENABLE_CHANNEL_SUBSCRIPTIONS** | True           | Enable channel subscriptions                            |
 | **REQUEST_TIMEOUT**        | [30, 60]             | Request timeout (min, max) in seconds                   |
@@ -128,7 +129,7 @@ Support the development using cryptocurrencies:
 ## 📞 Contact
 
 If you have any questions or suggestions:
-- **Telegram**: [Join our channel](https://t.me/+pwYQJQz0zyM0MmMy)
+- **Telegram**: [Join our channel](https://t.me/+d0sLjg42kJgxZTM6)
 
 ---
 

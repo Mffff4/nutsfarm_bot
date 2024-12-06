@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     REQUEST_TIMEOUT: tuple = (30, 60)
     RETRY_DELAY: tuple = (3, 10)
     MAX_RETRIES: int = 5
+    
+    AUTO_UPDATE: bool = True
+    CHECK_UPDATE_INTERVAL: int = 300
 
     SLEEP_TIME: tuple = (3600, 7200)
 
