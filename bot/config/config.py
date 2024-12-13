@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     USE_PROXY_FROM_FILE: bool = False
 
     REF_ID: str = "DTGYWCIWEZSAGUB"
-    ENABLE_CHANNEL_SUBSCRIPTIONS: bool = True
-
+    ENABLE_CHANNEL_SUBSCRIPTIONS: bool = False
+    START_DELAY: tuple = (0, 300)
     TASK_COMPLETION_DELAY: tuple = (5, 10)
     VERIFY_CHECK_ATTEMPTS: int = 10
     VERIFY_CHECK_DELAY: tuple = (3, 5)
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ENABLE_RICH_LOGGING: bool = True
     LOG_USER_AGENT: bool = True
     LOG_PROXY: bool = True
+    LOG_PROXY_CHECK: bool = False
 
     @property
     def API_URL(self) -> str:

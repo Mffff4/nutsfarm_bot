@@ -172,8 +172,63 @@ class Tapper:
             
         return headers
 
+    async def check_proxy(self) -> bool:
+        if not self.proxy_dict:
+            return True
+            
+        try:
+            headers = {
+                'Host': 'speed.cloudflare.com',
+                'Accept': 'application/json, text/plain, */*',
+                'Origin': 'https://bitappprod.com',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'cross-site',
+                'User-Agent': self.user_agent,
+                'Referer': 'https://bitappprod.com/',
+                'Sec-Fetch-Dest': 'empty',
+                'Accept-Language': 'ru'
+            }
+            
+            async with ClientSession() as session:
+                proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+                proxy_auth = None
+                if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
+                    proxy_auth = BasicAuth(self.proxy_dict['username'], self.proxy_dict['password'])
+                    
+                async with session.get(
+                    'https://speed.cloudflare.com/meta',
+                    headers=headers,
+                    proxy=proxy_url,
+                    proxy_auth=proxy_auth,
+                    ssl=False,
+                    timeout=10
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if settings.LOG_PROXY_CHECK:
+                            logger.info(
+                                f"{self.session_name} | "
+                                f"Proxy check successful | "
+                                f"IP: {data.get('clientIp')} | "
+                                f"Location: {data.get('city')}, {data.get('country')} | "
+                                f"ISP: {data.get('asOrganization')}"
+                            )
+                        return True
+                    if settings.LOG_PROXY_CHECK:
+                        logger.warning(f"{self.session_name} | Proxy check failed with status {response.status}")
+                    return False
+        except Exception as e:
+            if settings.LOG_PROXY_CHECK:
+                logger.warning(f"{self.session_name} | Proxy check failed: {str(e)}")
+            return False
+
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> dict | None:
         if not self.token and kwargs.pop('with_auth', True):
+            return None
+            
+        if self.proxy_dict and not await self.check_proxy():
+            logger.error(f"{self.session_name} | Proxy check failed, skipping request")
             return None
             
         url = f"{settings.API_URL}/{endpoint}"

@@ -1,0 +1,4 @@
+socks5://ip:port:login:password
+socks5://127.0.0.1:1080:user:pass
+http://proxy.example.com:8080:username:password
+http://127.0.0.1:8000:user:pass

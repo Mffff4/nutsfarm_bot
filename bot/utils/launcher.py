@@ -192,7 +192,7 @@ async def run_tasks(tg_clients: list[Client], proxies: list[str | None]):
     try:
         tasks = []
         for client, proxy in zip(tg_clients, proxies):
-            delay = random.uniform(0, 60)
+            delay = random.uniform(settings.START_DELAY[0], settings.START_DELAY[1])
             logger.info(f"{client.name} | Will start in {delay:.1f} seconds")
             
             async def delayed_start(client, proxy, delay):
