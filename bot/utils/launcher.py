@@ -132,7 +132,7 @@ async def process() -> None:
                 action = int(action)
                 break
 
-    if action == 111:
+    if action == 1:
         tg_clients = await get_tg_clients()
         if not tg_clients:
             print("No sessions found. You can create sessions using the following methods:")

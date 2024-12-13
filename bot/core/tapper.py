@@ -62,45 +62,31 @@ class Tapper:
         self.crypton_profile_username = None
         self.ton_wallet = None
         self.proxy_dict = None
+        self.completed_lessons = set()
 
-    def get_headers(self, with_auth: bool = False):
-        headers = {
-            'Host': 'nutsfarm.crypton.xyz',
-            'Sec-Fetch-Site': 'same-origin',
-            'Accept-Language': 'ru',
-            'Connection': 'keep-alive', 
-            'Sec-Fetch-Mode': 'cors',
-            'Accept': '*/*',
-            'User-Agent': self.user_agent,
-            'Sec-Fetch-Dest': 'empty',
-            'Referer': f'{settings.BASE_URL}/'
-        }
-        
-        if with_auth and self.token:
-            headers['Authorization'] = f'Bearer {self.token}'
-            
-        return headers
+    async def setup_proxy(self, proxy: str | None) -> None:
+        if proxy:
+            proxy_obj = Proxy.from_str(proxy)
+            if settings.LOG_PROXY:
+                logger.info(f"{self.session_name} | Using proxy: {proxy_obj.host}:{proxy_obj.port}")
+            self.proxy_dict = dict(
+                scheme=proxy_obj.protocol,
+                hostname=proxy_obj.host,
+                port=proxy_obj.port,
+                username=proxy_obj.login,
+                password=proxy_obj.password
+            )
+            self.tg_client.proxy = self.proxy_dict
+        else:
+            self.proxy_dict = None
+            self.tg_client.proxy = None
+            if settings.LOG_PROXY:
+                logger.info(f"{self.session_name} | Proxy not used")
 
     async def get_tg_web_data(self, proxy: str | None) -> str:
         async with self.client_lock:
             logger.info(f"{self.session_name} | Started obtaining tg_web_data")
-            if proxy:
-                proxy = Proxy.from_str(proxy)
-                if settings.LOG_PROXY:
-                    logger.info(f"{self.session_name} | Using proxy: {proxy.host}:{proxy.port}")
-                self.proxy_dict = dict(
-                    scheme=proxy.protocol,
-                    hostname=proxy.host,
-                    port=proxy.port,
-                    username=proxy.login,
-                    password=proxy.password
-                )
-            else:
-                self.proxy_dict = None
-                if settings.LOG_PROXY:
-                    logger.info(f"{self.session_name} | Proxy not used")
-
-            self.tg_client.proxy = self.proxy_dict
+            await self.setup_proxy(proxy)
 
             try:
                 with_tg = True
@@ -168,6 +154,24 @@ class Tapper:
                 await asyncio.sleep(settings.RETRY_DELAY[0])
                 return None
 
+    def get_headers(self, with_auth: bool = False):
+        headers = {
+            'Host': 'nutsfarm.crypton.xyz',
+            'Sec-Fetch-Site': 'same-origin',
+            'Accept-Language': 'ru',
+            'Connection': 'keep-alive', 
+            'Sec-Fetch-Mode': 'cors',
+            'Accept': '*/*',
+            'User-Agent': self.user_agent,
+            'Sec-Fetch-Dest': 'empty',
+            'Referer': f'{settings.BASE_URL}/'
+        }
+        
+        if with_auth and self.token:
+            headers['Authorization'] = f'Bearer {self.token}'
+            
+        return headers
+
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> dict | None:
         if not self.token and kwargs.pop('with_auth', True):
             return None
@@ -185,19 +189,24 @@ class Tapper:
                 async with ClientSession() as session:
                     timeout = random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1])
                     
-                    if self.proxy_dict:
-                        kwargs['proxy'] = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
-                        if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
-                            auth = aiohttp.BasicAuth(self.proxy_dict['username'], self.proxy_dict['password'])
-                            kwargs['proxy_auth'] = auth
-                    
-                    async with getattr(session, method.lower())(
-                        url=url,
-                        headers=headers,
-                        ssl=False,
-                        timeout=ClientTimeout(total=timeout),
+                    request_kwargs = {
+                        'url': url,
+                        'headers': headers,
+                        'ssl': False,
+                        'timeout': ClientTimeout(total=timeout),
                         **kwargs
-                    ) as response:
+                    }
+
+                    if self.proxy_dict:
+                        proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+                        request_kwargs['proxy'] = proxy_url
+                        if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
+                            request_kwargs['proxy_auth'] = BasicAuth(
+                                self.proxy_dict['username'],
+                                self.proxy_dict['password']
+                            )
+                    
+                    async with getattr(session, method.lower())(**request_kwargs) as response:
                         if response.status == 429: 
                             retry_after = int(response.headers.get('Retry-After', 60))
                             logger.warning(f"{self.session_name} | Rate limit exceeded, waiting {retry_after} seconds")
@@ -1040,7 +1049,78 @@ class Tapper:
                 logger.info(f"{self.session_name} | Total referrals: {total}")
                 return int(total)
         return None
+    
+    async def get_available_lessons(self) -> list:
+        result = await self._make_request(
+            'GET',
+            'learn/active',
+            params={'lang': 'RU'}
+        )
+        if not result:
+            return []
+        available_lessons = []
+        for module in result:
+            if not module.get('isActive') or not module.get('isPublished'):
+                continue
+            lessons = module.get('lessons', [])
+            for lesson in lessons:
+                if lesson.get('reward', 0) > 0 and not lesson.get('isClaimed'):
+                    lesson['moduleId'] = module['id']
+                    lesson['moduleTitle'] = module['title']
+                    available_lessons.append(lesson)
+        return sorted(available_lessons, key=lambda x: (x['pageNumber'], x['reward']))
 
+    async def claim_lesson_reward(self, lesson_id: str) -> int:
+        if lesson_id in self.completed_lessons:
+            logger.info(f"{self.session_name} | Lesson {lesson_id} is already completed")
+            return 0
+        result = await self._make_request(
+            'POST',
+            f'learn/claim/{lesson_id}',
+            headers={'Origin': settings.BASE_URL}
+        )
+        if isinstance(result, (int, float)):
+            reward = int(result)
+            self.completed_lessons.add(lesson_id)
+            logger.success(f"{self.session_name} | Reward claimed for lesson: {reward}")
+            return reward
+        return 0
+
+    async def process_lessons(self) -> None:
+        available_lessons = await self.get_available_lessons()
+        if not available_lessons:
+            logger.info(f"{self.session_name} | No available lessons")
+            return
+        total_reward = 0
+        completed = 0
+        for lesson in available_lessons:
+            lesson_id = lesson['id']
+            title = lesson['title']
+            reward = lesson['reward']
+            module_title = lesson['moduleTitle']
+            delay = random.uniform(5, 10)
+            logger.info(f"{self.session_name} | Waiting {delay:.1f} seconds before processing lesson...")
+            await asyncio.sleep(delay)
+            logger.info(
+                f"{self.session_name} | "
+                f"Processing lesson: {title} | "
+                f"Module: {module_title} | "
+                f"Reward: {reward}"
+            )
+            reward = await self.claim_lesson_reward(lesson_id)
+            if reward > 0:
+                total_reward += reward
+                completed += 1
+                delay = random.uniform(8, 15)
+                logger.info(f"{self.session_name} | Waiting {delay:.1f} seconds...")
+                await asyncio.sleep(delay)
+        if completed > 0:
+            logger.info(
+                f"{self.session_name} | "
+                f"Lessons completed: {completed} | "
+                f"Total reward: {total_reward}"
+            )
+            
 async def run_tappers(tg_clients: list[Client], proxies: list[str | None]):
     session_sleep_times = {}
     active_sessions = set()
@@ -1102,6 +1182,8 @@ async def run_tappers(tg_clients: list[Client], proxies: list[str | None]):
                         logger.success(f"{tapper.session_name} | Referral reward claimed")
 
                     await tapper.process_stories()
+                    
+                    await tapper.process_lessons()
                     
                     completed_tasks = 0
                     total_rewards = 0
