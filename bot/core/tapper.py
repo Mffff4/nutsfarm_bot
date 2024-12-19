@@ -389,7 +389,7 @@ class Tapper:
                 filtered_tasks.append(task)
                 continue
             
-            if task_type in ['TELEGRAM_CHANNEL_SUBSCRIPTION', 'URL']:
+            if task_type in ['TELEGRAM_CHANNEL_SUBSCRIPTION', 'URL', 'LEARN_LESSON']:
                 if not settings.ENABLE_CHANNEL_SUBSCRIPTIONS and task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
                     continue
                     
@@ -397,7 +397,8 @@ class Tapper:
                 channel_id = task.get('telegramChannelId')
                 task_type_str = {
                     'TELEGRAM_CHANNEL_SUBSCRIPTION': "Channel subscription",
-                    'URL': "URL"
+                    'URL': "URL",
+                    'LEARN_LESSON': "Learn lesson"
                 }.get(task_type, task_type)
                 
                 logger.info(
@@ -595,6 +596,21 @@ class Tapper:
             f"Reward: {reward}"
         )
         
+        if task_type == 'LEARN_LESSON':
+            available_lessons = await self.get_available_lessons()
+            if not available_lessons:
+                logger.info(f"{self.session_name} | No available lessons")
+                return False
+                
+            for lesson in available_lessons:
+                lesson_id = lesson['id']
+                if lesson_id == task_id:
+                    reward = await self.claim_lesson_reward(lesson_id)
+                    return reward > 0
+            
+            logger.error(f"{self.session_name} | Lesson {task_id} not found in available lessons")
+            return False
+            
         if task_type == 'URL':
             url = task.get('link')
             if not url:

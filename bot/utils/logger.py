@@ -11,7 +11,7 @@ custom_theme = Theme({
     "error": "red",
     "success": "bold green",
     "timestamp": "cyan",
-    "debug": "dim white"  # Для детальных логов
+    "debug": "dim white" 
 })
 
 console = Console(theme=custom_theme)
