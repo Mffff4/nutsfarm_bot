@@ -29,6 +29,7 @@ import json
 from pyrogram import raw
 from bot.utils.logger import logger
 from bot.config import settings
+from bot.config.config import Settings
 
 console = Console()
 
@@ -48,6 +49,7 @@ class Tapper:
     def __init__(self, tg_client: Client):
         self.session_name = tg_client.name
         self.tg_client = tg_client
+        self.settings = Settings()
         self.user_id = 0
         self.username = None
         self.first_name = None
@@ -155,8 +157,9 @@ class Tapper:
                 return None
 
     def get_headers(self, with_auth: bool = False):
+        base_url = self.settings.BASE_URL.rstrip('/')
         headers = {
-            'Host': 'nutsfarm.crypton.xyz',
+            'Host': base_url.replace('https://', ''),
             'Sec-Fetch-Site': 'same-origin',
             'Accept-Language': 'ru',
             'Connection': 'keep-alive', 
@@ -164,7 +167,7 @@ class Tapper:
             'Accept': '*/*',
             'User-Agent': self.user_agent,
             'Sec-Fetch-Dest': 'empty',
-            'Referer': f'{settings.BASE_URL}/'
+            'Referer': f'{base_url}/'
         }
         
         if with_auth and self.token:
@@ -180,12 +183,12 @@ class Tapper:
             headers = {
                 'Host': 'speed.cloudflare.com',
                 'Accept': 'application/json, text/plain, */*',
-                'Origin': 'https://bitappprod.com',
+                'Origin': self.settings.BASE_URL.rstrip('/'),
                 'Connection': 'keep-alive',
                 'Sec-Fetch-Mode': 'cors',
                 'Sec-Fetch-Site': 'cross-site',
                 'User-Agent': self.user_agent,
-                'Referer': 'https://bitappprod.com/',
+                'Referer': f'{self.settings.BASE_URL}',
                 'Sec-Fetch-Dest': 'empty',
                 'Accept-Language': 'ru'
             }
@@ -231,7 +234,7 @@ class Tapper:
             logger.error(f"{self.session_name} | Proxy check failed, skipping request")
             return None
             
-        url = f"{settings.API_URL}/{endpoint}"
+        url = f"{self.settings.BASE_URL}api/{self.settings.API_VERSION}/{endpoint}"
         headers = self.get_headers(with_auth=kwargs.pop('with_auth', True))
         
         if 'headers' in kwargs:
@@ -456,7 +459,7 @@ class Tapper:
         result = await self._make_request(
             'POST', 
             'farming/claim',
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         
         if result is not None:
@@ -476,7 +479,7 @@ class Tapper:
         result = await self._make_request(
             'POST', 
             'farming/farm',
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         
         if result is not None:
@@ -766,9 +769,9 @@ class Tapper:
             'POST',
             'task/start',
             headers={
-                'Origin': settings.BASE_URL,
+                'Origin': self.settings.BASE_URL.rstrip('/'),
                 'Content-Type': 'application/json',
-                'Referer': f'{settings.BASE_URL}/tasks'
+                'Referer': f'{self.settings.BASE_URL}tasks'
             },
             json=data
         )
@@ -781,11 +784,54 @@ class Tapper:
             logger.error(f"{self.session_name} | Failed to get task ID")
         return None
 
+    async def verify_task(self, user_task_id: str, task_type: str, telegram_channel_id: int = None) -> bool:
+        data = {
+            "userTaskId": user_task_id,
+            "type": task_type
+        }
+        
+        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
+            data["telegramChannelId"] = telegram_channel_id
+        elif task_type == 'URL':
+            pass
+            
+        result = await self._make_request(
+            'POST',
+            'task/verify',
+            headers={
+                'Origin': self.settings.BASE_URL.rstrip('/'),
+                'Content-Type': 'application/json',
+                'Referer': f'{self.settings.BASE_URL}tasks'
+            },
+            json=data
+        )
+        
+        if result:
+            status = result.get('status')
+            if status == 'VERIFYING':
+                logger.success(f"{self.session_name} | Task sent for verification")
+                return True
+            logger.error(f"{self.session_name} | Unexpected verification status: {status}")
+        return False
+
+    async def claim_start_bonus(self) -> bool:
+        result = await self._make_request(
+            'POST',
+            'farming/startBonus',
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
+        )
+        
+        if isinstance(result, (int, float)):
+            logger.success(f"{self.session_name} | Start bonus received: {result}")
+            return True
+        logger.error(f"{self.session_name} | Invalid start bonus format: {result}")
+        return False
+
     async def claim_task_reward(self, completion_id: str) -> int:
         result = await self._make_request(
             'POST',
             f'task/claim/{completion_id}',
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         
         if isinstance(result, (int, float)):
@@ -798,9 +844,10 @@ class Tapper:
         return await self._make_request('GET', 'task/current')
 
     async def login(self, auth_data: str) -> bool:
-        url = 'https://nutsfarm.crypton.xyz/api/v1/auth/login'
+        settings = Settings()
+        url = f"{settings.BASE_URL}api/{settings.API_VERSION}/auth/login"
         headers = self.get_headers()
-        headers['Origin'] = 'https://nutsfarm.crypton.xyz'
+        headers['Origin'] = settings.BASE_URL.rstrip('/')
         headers['Content-Type'] = 'text/plain;charset=UTF-8'
         
         try:
@@ -831,16 +878,18 @@ class Tapper:
             return False
 
     async def register(self, auth_data: str, referral_code: str = None) -> bool:
-        url = 'https://nutsfarm.crypton.xyz/api/v1/auth/register'
+        settings = Settings()
+        base_url = settings.BASE_URL.rstrip('/')
+        url = f"{base_url}/api/{settings.API_VERSION}/auth/register"
         headers = {
-            'Host': 'nutsfarm.crypton.xyz',
+            'Host': base_url.replace('https://', ''),
             'Accept': '*/*',
             'Sec-Fetch-Site': 'same-origin',
             'Accept-Language': 'ru',
             'Sec-Fetch-Mode': 'cors',
-            'Origin': 'https://nutsfarm.crypton.xyz',
+            'Origin': base_url,
             'User-Agent': self.user_agent,
-            'Referer': f'https://nutsfarm.crypton.xyz/?startapp=ref_nutsfarm_bot&tgWebAppStartParam=ref_{referral_code}' if referral_code else 'https://nutsfarm.crypton.xyz/',
+            'Referer': f'{base_url}/?startapp=ref_nutsfarm_bot&tgWebAppStartParam=ref_{referral_code}' if referral_code else f'{base_url}/',
             'Connection': 'keep-alive',
             'Sec-Fetch-Dest': 'empty',
             'Content-Type': 'application/json'
@@ -896,19 +945,6 @@ class Tapper:
             
         return await self.register(auth_data, referral_code)
 
-    async def claim_start_bonus(self) -> bool:
-        result = await self._make_request(
-            'POST',
-            'farming/startBonus',
-            headers={'Origin': settings.BASE_URL}
-        )
-        
-        if isinstance(result, (int, float)):
-            logger.success(f"{self.session_name} | Start bonus received: {result}")
-            return True
-        logger.error(f"{self.session_name} | Invalid start bonus format: {result}")
-        return False
-
     async def check_and_claim_streak(self) -> bool:
         streak_info = await self._make_request(
             'GET',
@@ -950,7 +986,7 @@ class Tapper:
                 'timezone': 'Europe/Moscow',
                 'payForFreeze': str(use_freeze).lower()
             },
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         
         if result:
@@ -989,36 +1025,6 @@ class Tapper:
                     
         return {'status': status_type}
 
-    async def verify_task(self, user_task_id: str, task_type: str, telegram_channel_id: int = None) -> bool:
-        data = {
-            "userTaskId": user_task_id,
-            "type": task_type
-        }
-        
-        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
-            data["telegramChannelId"] = telegram_channel_id
-        elif task_type == 'URL':
-            pass
-            
-        result = await self._make_request(
-            'POST',
-            'task/verify',
-            headers={
-                'Origin': settings.BASE_URL,
-                'Content-Type': 'application/json',
-                'Referer': f'{settings.BASE_URL}/tasks'
-            },
-            json=data
-        )
-        
-        if result:
-            status = result.get('status')
-            if status == 'VERIFYING':
-                logger.success(f"{self.session_name} | Task sent for verification")
-                return True
-            logger.error(f"{self.session_name} | Unexpected verification status: {status}")
-        return False
-
     async def get_active_stories(self) -> list | None:
         return await self._make_request('GET', 'story/active')
 
@@ -1029,7 +1035,7 @@ class Tapper:
         result = await self._make_request(
             'POST',
             f'story/read/{story_id}',
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         
         if isinstance(result, (int, float)):
@@ -1079,7 +1085,7 @@ class Tapper:
         return None
     
     async def claim_referral_reward(self) -> float | None:
-        result = await self._make_request('POST', 'user/current/referrals/claim', headers={'Origin': settings.BASE_URL})
+        result = await self._make_request('POST', 'user/current/referrals/claim', headers={'Origin': self.settings.BASE_URL.rstrip('/')})
         if isinstance(result, (int, float)):
             logger.success(f"{self.session_name} | Referral reward claimed: {result}")
             return float(result)
@@ -1148,7 +1154,7 @@ class Tapper:
         result = await self._make_request(
             'POST',
             f'learn/claim/{lesson_id}',
-            headers={'Origin': settings.BASE_URL}
+            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
         )
         if isinstance(result, (int, float)):
             reward = int(result)

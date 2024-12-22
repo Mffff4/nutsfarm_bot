@@ -1,6 +1,9 @@
+from bot.config.config import Settings
+
 def get_headers(user_agent: str, with_auth: bool = False, token: str = None) -> dict:
+    base_url = Settings().BASE_URL.replace('https://', '').replace('/', '')
     headers = {
-        'Host': 'nutsfarm.crypton.xyz',
+        'Host': base_url,
         'Sec-Fetch-Site': 'same-origin',
         'Accept-Language': 'ru',
         'Connection': 'keep-alive',
@@ -8,7 +11,7 @@ def get_headers(user_agent: str, with_auth: bool = False, token: str = None) -> 
         'Accept': '*/*',
         'User-Agent': user_agent,
         'Sec-Fetch-Dest': 'empty',
-        'Referer': 'https://nutsfarm.crypton.xyz/'
+        'Referer': Settings().BASE_URL
     }
     
     if with_auth and token:
