@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     SLEEP_TIME: tuple = (3600, 7200)
 
-    BASE_URL: str = "https://nutsfarm.crypton.xyz"
+    BASE_URL: str = "https://nutsfarm-api.crypton.xyz/"
     API_VERSION: str = "v1"
 
     LOGGING_LEVEL: str = "INFO"
