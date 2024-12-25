@@ -1,20 +1,75 @@
-from bot.config.config import Settings
+from typing import Dict, Optional
 
-def get_headers(user_agent: str, with_auth: bool = False, token: str = None) -> dict:
-    base_url = Settings().BASE_URL.replace('https://', '').replace('/', '')
+def _get_language(country: Optional[str] = None) -> str:
+    return 'EN' if country and country != 'RU' else 'RU'
+
+def get_headers(user_agent: str, with_auth: bool = False, token: Optional[str] = None, country: Optional[str] = None) -> Dict[str, str]:
+    lang = _get_language(country)
     headers = {
-        'Host': base_url,
-        'Sec-Fetch-Site': 'same-origin',
-        'Accept-Language': 'ru',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Mode': 'cors', 
-        'Accept': '*/*',
-        'User-Agent': user_agent,
-        'Sec-Fetch-Dest': 'empty',
-        'Referer': Settings().BASE_URL
+        'accept': '*/*',
+        'accept-language': lang.lower(),
+        'content-type': 'application/json',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'referer': 'https://nutsfarm.crypton.xyz/',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site',
+        'user-agent': user_agent
     }
     
     if with_auth and token:
-        headers['Authorization'] = f'Bearer {token}'
+        headers['authorization'] = f'Bearer {token}'
         
     return headers
+
+def get_task_headers(country: Optional[str] = None) -> Dict[str, str]:
+    lang = _get_language(country)
+    return {
+        'accept': '*/*',
+        'accept-language': lang.lower(),
+        'content-type': 'application/json',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'referer': 'https://nutsfarm.crypton.xyz/',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
+    }
+
+def get_farming_headers(country: Optional[str] = None) -> Dict[str, str]:
+    lang = _get_language(country)
+    return {
+        'accept': '*/*',
+        'accept-language': lang.lower(),
+        'content-type': 'application/json',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'referer': 'https://nutsfarm.crypton.xyz/farming',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
+    }
+
+def get_auth_headers(country: Optional[str] = None) -> Dict[str, str]:
+    lang = _get_language(country)
+    return {
+        'accept': '*/*',
+        'accept-language': lang.lower(),
+        'content-type': 'application/json',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'referer': 'https://nutsfarm.crypton.xyz/auth',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
+    }
+
+def get_proxy_check_headers(country: Optional[str] = None) -> Dict[str, str]:
+    lang = _get_language(country)
+    return {
+        'accept': '*/*',
+        'accept-language': lang.lower(),
+        'content-type': 'application/json',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'referer': 'https://nutsfarm.crypton.xyz/proxy-check',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
+    }

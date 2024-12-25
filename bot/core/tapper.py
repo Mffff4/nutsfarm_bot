@@ -30,6 +30,14 @@ from pyrogram import raw
 from bot.utils.logger import logger
 from bot.config import settings
 from bot.config.config import Settings
+from bot.core.headers import (
+    get_headers, 
+    get_task_headers,
+    get_farming_headers,
+    get_auth_headers,
+    get_proxy_check_headers
+)
+from rich.table import Table
 
 console = Console()
 
@@ -55,6 +63,7 @@ class Tapper:
         self.first_name = None
         self.last_name = None
         self.token = None
+        self.refresh_token = None
         self.client_lock = asyncio.Lock()
         self.user_agent = load_or_generate_user_agent(self.session_name)
         self.retry_count = 0
@@ -65,6 +74,10 @@ class Tapper:
         self.ton_wallet = None
         self.proxy_dict = None
         self.completed_lessons = set()
+        self.proxy_country = None
+
+    def get_headers(self, with_auth: bool = False) -> dict:
+        return get_headers(self.user_agent, with_auth, self.token, self.proxy_country)
 
     async def setup_proxy(self, proxy: str | None) -> None:
         if proxy:
@@ -156,27 +169,9 @@ class Tapper:
                 await asyncio.sleep(settings.RETRY_DELAY[0])
                 return None
 
-    def get_headers(self, with_auth: bool = False):
-        base_url = self.settings.BASE_URL.rstrip('/')
-        headers = {
-            'Host': base_url.replace('https://', ''),
-            'Sec-Fetch-Site': 'same-origin',
-            'Accept-Language': 'ru',
-            'Connection': 'keep-alive', 
-            'Sec-Fetch-Mode': 'cors',
-            'Accept': '*/*',
-            'User-Agent': self.user_agent,
-            'Sec-Fetch-Dest': 'empty',
-            'Referer': f'{base_url}/'
-        }
-        
-        if with_auth and self.token:
-            headers['Authorization'] = f'Bearer {self.token}'
-            
-        return headers
-
     async def check_proxy(self) -> bool:
         if not self.proxy_dict:
+            self.proxy_country = None
             return True
             
         try:
@@ -209,12 +204,13 @@ class Tapper:
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
+                        self.proxy_country = data.get('country')
                         if settings.LOG_PROXY_CHECK:
                             logger.info(
                                 f"{self.session_name} | "
                                 f"Proxy check successful | "
                                 f"IP: {data.get('clientIp')} | "
-                                f"Location: {data.get('city')}, {data.get('country')} | "
+                                f"Location: {data.get('city')}, {self.proxy_country} | "
                                 f"ISP: {data.get('asOrganization')}"
                             )
                         return True
@@ -238,9 +234,17 @@ class Tapper:
         headers = self.get_headers(with_auth=kwargs.pop('with_auth', True))
         
         if 'headers' in kwargs:
-            headers.update(kwargs.pop('headers'))
+            if isinstance(kwargs['headers'], dict):
+                headers.update(kwargs['headers'])
+            kwargs.pop('headers')
             
+        if 'params' in kwargs and isinstance(kwargs['params'], dict):
+            if 'lang' in kwargs['params']:
+                kwargs['params']['lang'] = 'EN' if self.proxy_country and self.proxy_country != 'RU' else 'RU'
+
         retry_count = 0
+        auth_retry_count = 0
+        max_auth_retries = 2
         
         while retry_count < settings.MAX_RETRIES:
             try:
@@ -265,6 +269,22 @@ class Tapper:
                             )
                     
                     async with getattr(session, method.lower())(**request_kwargs) as response:
+                        if response.status in [401, 403]:
+                            if auth_retry_count < max_auth_retries:
+                                auth_retry_count += 1
+                                if await self.refresh_access_token():
+                                    headers = self.get_headers(with_auth=True)
+                                    request_kwargs['headers'] = headers
+                                    continue
+                                else:
+                                    tg_web_data = await self.get_tg_web_data(None)
+                                    if tg_web_data and await self.authorize(tg_web_data):
+                                        headers = self.get_headers(with_auth=True)
+                                        request_kwargs['headers'] = headers
+                                        continue
+                            logger.error(f"{self.session_name} | Authorization failed after {auth_retry_count} attempts")
+                            return None
+                                
                         if response.status == 429: 
                             retry_after = int(response.headers.get('Retry-After', 60))
                             logger.warning(f"{self.session_name} | Rate limit exceeded, waiting {retry_after} seconds")
@@ -326,8 +346,11 @@ class Tapper:
                     logger.error(f"{self.session_name} | Request failed after {settings.MAX_RETRIES} attempts")
                     return None
 
+    def _get_language(self) -> str:
+        return 'EN' if self.proxy_country and self.proxy_country != 'RU' else 'RU'
+
     async def get_user_info(self) -> dict | None:
-        data = await self._make_request('GET', 'user/current', params={'lang': 'RU'})
+        data = await self._make_request('GET', 'user/current', params={'lang': self._get_language()})
         if data:
             self.balance = data.get('balance', 0)
             self.username = data.get('username')
@@ -344,7 +367,7 @@ class Tapper:
         return data
 
     async def get_tasks(self) -> list | None:
-        tasks = await self._make_request('GET', 'task/active', params={'lang': 'ru'})
+        tasks = await self._make_request('GET', 'task/active', params={'lang': self._get_language()})
         if not tasks:
             return None
             
@@ -352,7 +375,8 @@ class Tapper:
         
         current_tasks = await self.get_current_tasks()
         claimed_task_ids = []
-        completed_tasks = []
+        verified_tasks = []
+        verifying_task_ids = []
         
         if current_tasks:
             for current_task in current_tasks:
@@ -362,13 +386,45 @@ class Tapper:
                 if status == 'CLAIMED':
                     claimed_task_ids.append(task_id)
                 elif status == 'COMPLETED':
-                    completed_tasks.append(current_task)
+                    original_task = next((t for t in tasks if t['task']['id'] == task_id), None)
+                    if original_task:
+                        verified_tasks.append({
+                            **original_task,
+                            'completion_id': current_task['id']
+                        })
+                elif status == 'VERIFYING':
+                    verifying_task_ids.append(task_id)
         
         filtered_tasks = []
+        learn_tasks = []
+        other_tasks = []
         tasks_to_complete = 0
         
         referrals_count = None
+
+        table = Table(
+            "№", "Title", "Type", "Reward", "Status",
+            title=f"Tasks for {self.session_name}",
+            title_style="bold magenta",
+            header_style="bold cyan",
+            border_style="bright_black"
+        )
         
+        task_number = 1
+        
+        for task in verified_tasks:
+            tasks_to_complete += 1
+            filtered_tasks.append(task)
+            
+            table.add_row(
+                str(task_number),
+                task['title'],
+                task['task']['type'],
+                str(task['task']['reward']),
+                "[green]✓ Verified[/green]"
+            )
+            task_number += 1
+
         for task in tasks:
             task_info = task['task']
             task_type = task_info['type']
@@ -378,41 +434,44 @@ class Tapper:
             
             if task_id in claimed_task_ids:
                 continue
-            
-            completed_task = next((t for t in completed_tasks if t['taskId'] == task_id), None)
-            if completed_task:
-                tasks_to_complete += 1
-                logger.info(
-                    f"{self.session_name} | "
-                    f"Task: {title} | "
-                    f"Type: {task_type} | "
-                    f"Reward: {reward} | "
-                    f"✅ Added to queue (need to claim reward)"
-                )
-                filtered_tasks.append(task)
+                
+            if task_id in [t['task']['id'] for t in verified_tasks]:
                 continue
+                
+            if task_id in verifying_task_ids:
+                table.add_row(
+                    str(task_number),
+                    title,
+                    task_type,
+                    str(reward),
+                    "[yellow]⌛ Verifying[/yellow]"
+                )
+                task_number += 1
+                continue
+            
+            status = ""
             
             if task_type in ['TELEGRAM_CHANNEL_SUBSCRIPTION', 'URL', 'LEARN_LESSON']:
                 if not settings.ENABLE_CHANNEL_SUBSCRIPTIONS and task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
                     continue
                     
                 tasks_to_complete += 1
-                channel_id = task.get('telegramChannelId')
-                task_type_str = {
-                    'TELEGRAM_CHANNEL_SUBSCRIPTION': "Channel subscription",
-                    'URL': "URL",
-                    'LEARN_LESSON': "Learn lesson"
-                }.get(task_type, task_type)
-                
-                logger.info(
-                    f"{self.session_name} | "
-                    f"Task: {title} | "
-                    f"Type: {task_type_str} | "
-                    f"{'Channel ID: ' + str(channel_id) + ' | ' if channel_id else ''}"
-                    f"Reward: {reward} | "
-                    f"✅ Added to queue"
+                if task_type == 'LEARN_LESSON':
+                    learn_tasks.append(task)
+                    status = "[yellow]In queue (Lesson)[/yellow]"
+                else:
+                    other_tasks.append(task)
+                    status = "[yellow]In queue[/yellow]"
+                    
+                table.add_row(
+                    str(task_number),
+                    title,
+                    task_type,
+                    str(reward),
+                    status
                 )
-                filtered_tasks.append(task)
+                task_number += 1
+                    
             elif task_type == 'RECRUIT_REFERRALS':
                 if referrals_count is None:
                     referrals_count = await self.get_referrals_count() or 0
@@ -421,37 +480,40 @@ class Tapper:
                     required_refs = int(''.join(filter(str.isdigit, title)))
                     if referrals_count >= required_refs:
                         tasks_to_complete += 1
-                        logger.info(
-                            f"{self.session_name} | "
-                            f"Task: {title} | "
-                            f"Type: Referral task | "
-                            f"Reward: {reward} | "
-                            f"✅ Added to queue (have {referrals_count}/{required_refs} referrals)"
-                        )
-                        filtered_tasks.append(task)
+                        other_tasks.append(task)
+                        status = f"[yellow]In queue ({referrals_count}/{required_refs})[/yellow]"
                     else:
-                        logger.info(
-                            f"{self.session_name} | "
-                            f"Task: {title} | "
-                            f"Type: Referral task | "
-                            f"Reward: {reward} | "
-                            f"⚠️ Skipped (have {referrals_count}/{required_refs} referrals)"
-                        )
+                        status = f"[red]Skipped ({referrals_count}/{required_refs})[/red]"
+                        
+                    table.add_row(
+                        str(task_number),
+                        title,
+                        "Referrals",
+                        str(reward),
+                        status
+                    )
+                    task_number += 1
                 except ValueError:
                     logger.error(f"{self.session_name} | Failed to parse required referrals count from title: {title}")
             else:
-                logger.info(
-                    f"{self.session_name} | "
-                    f"Task: {title} | "
-                    f"Type: {task_type} | "
-                    f"Reward: {reward} | "
-                    f"⚠️ Skipped (unsupported type)"
+                table.add_row(
+                    str(task_number),
+                    title,
+                    task_type,
+                    str(reward),
+                    "[red]Not supported[/red]"
                 )
+                task_number += 1
+        
+        filtered_tasks.extend(learn_tasks)
+        filtered_tasks.extend(other_tasks)
         
         if tasks_to_complete > 0:
             logger.info(f"{self.session_name} | {tasks_to_complete} tasks to complete")
         else:
             logger.info(f"{self.session_name} | No tasks to complete")
+            
+        console.print(table)
             
         return filtered_tasks
 
@@ -557,12 +619,8 @@ class Tapper:
                         )
                     )
                 )
-                logger.info(f"{self.session_name} | Notifications disabled")
-            except RPCError as e:
-                if "CHANNEL_PRIVATE" in str(e):
-                    logger.info(f"{self.session_name} | Cannot configure notifications for private channel")
-                else:
-                    logger.warning(f"{self.session_name} | Error while configuring notifications: {str(e)}")
+            except RPCError:
+                pass
 
             try:
                 await self.tg_client.invoke(
@@ -575,15 +633,34 @@ class Tapper:
                         ]
                     )
                 )
-                logger.info(f"{self.session_name} | Channel added to archive")
-            except RPCError as e:
-                if "CHANNEL_PRIVATE" in str(e):
-                    logger.info(f"{self.session_name} | Cannot archive private channel")
-                else:
-                    logger.warning(f"{self.session_name} | Error while archiving channel: {str(e)}")
+            except RPCError:
+                pass
 
-        except Exception as e:
-            logger.warning(f"{self.session_name} | Error while configuring channel: {str(e)}")
+        except Exception:
+            pass
+
+    async def verify_task(self, user_task_id: str, task_type: str, telegram_channel_id: int = None) -> bool:
+        data = {
+            "userTaskId": user_task_id,
+            "type": task_type
+        }
+        
+        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION' and telegram_channel_id:
+            data["telegramChannelId"] = telegram_channel_id
+            
+        result = await self._make_request(
+            'POST',
+            'task/verify',
+            headers=get_task_headers(),
+            json=data
+        )
+        
+        if result:
+            status = result.get('status')
+            if status in ['VERIFYING', 'FARMING', 'COMPLETED']:
+                return True
+            logger.error(f"{self.session_name} | Verification failed: {status}")
+        return False
 
     async def complete_task(self, task: dict) -> bool:
         task_info = task['task']
@@ -591,35 +668,64 @@ class Tapper:
         task_id = task_info['id']
         title = task['title']
         reward = task_info['reward']
+        status = task.get('status', '')
 
-        logger.info(
-            f"{self.session_name} | "
-            f"Starting task completion: {title} | "
-            f"Type: {task_type} | "
-            f"Reward: {reward}"
-        )
-        
-        if task_type == 'LEARN_LESSON':
-            available_lessons = await self.get_available_lessons()
-            if not available_lessons:
-                logger.info(f"{self.session_name} | No available lessons")
-                return False
-                
-            for lesson in available_lessons:
-                lesson_id = lesson['id']
-                if lesson_id == task_id:
-                    reward = await self.claim_lesson_reward(lesson_id)
-                    return reward > 0
+        logger.info(f"{self.session_name} | Task: {title} | {task_type} | {reward} NUTS")
+
+        if status == 'CLAIMED':
+            return True
             
-            logger.error(f"{self.session_name} | Lesson {task_id} not found in available lessons")
+        elif status == 'COMPLETED':
+            received_reward = await self.claim_task_reward(task['id'])
+            if received_reward > 0:
+                logger.success(f"{self.session_name} | Received {received_reward} NUTS")
+                await asyncio.sleep(random.uniform(8, 12))
+                return True
             return False
             
+        elif status == 'VERIFYING':
+            for attempt in range(3):
+                await asyncio.sleep(5)
+                
+                current_tasks = await self.get_current_tasks()
+                if not current_tasks:
+                    continue
+                    
+                current_task = next((t for t in current_tasks if t['id'] == task['id']), None)
+                if not current_task:
+                    continue
+                    
+                current_status = current_task.get('status')
+                
+                if current_status == 'COMPLETED':
+                    received_reward = await self.claim_task_reward(task['id'])
+                    if received_reward > 0:
+                        logger.success(f"{self.session_name} | Received {received_reward} NUTS")
+                        await asyncio.sleep(random.uniform(8, 12))
+                        return True
+                elif current_status == 'CLAIMED':
+                    return True
+                    
+            logger.error(f"{self.session_name} | Verification timeout")
+            return False
+            
+        elif status == 'PENDING':
+            if not await self.verify_task(task['id'], task_type, task.get('telegramChannelId')):
+                return False
+            await asyncio.sleep(random.uniform(5, 8))
+            return True
+
+        completion_id = await self.start_task(task_id, task_type)
+        if not completion_id:
+            return False
+            
+        await asyncio.sleep(random.uniform(5, 8))
+
         if task_type == 'URL':
             url = task.get('link')
             if not url:
-                logger.error(f"{self.session_name} | URL task missing link")
                 return False
-            
+                
             if 'short.trustwallet.com' in url or 't.me/' in url:
                 try:
                     async with ClientSession() as session:
@@ -628,191 +734,62 @@ class Tapper:
                                 text = await response.text()
                                 if 'tg://resolve?domain=' in text:
                                     channel_username = text.split('tg://resolve?domain=')[1].split('"')[0]
-                                    logger.info(f"{self.session_name} | Found Telegram channel: {channel_username}")
-                                    
                                     if not await self.join_telegram_channel(None, f"https://t.me/{channel_username}"):
-                                        logger.error(f"{self.session_name} | Failed to join channel {channel_username}")
                                         return False
                 except Exception as e:
-                    logger.error(f"{self.session_name} | Error processing URL task: {str(e)}")
+                    logger.error(f"{self.session_name} | URL task error: {str(e)}")
                     return False
 
-        if task_type == 'RECRUIT_REFERRALS':
+        elif task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
+            channel_id = task.get('telegramChannelId')
+            channel_url = task.get('link')
+            
+            if not await self.join_telegram_channel(channel_id, channel_url):
+                return False
+
+        elif task_type == 'RECRUIT_REFERRALS':
             try:
                 required_refs = int(''.join(filter(str.isdigit, title)))
                 current_refs = await self.get_referrals_count()
-                if current_refs is None:
-                    logger.error(f"{self.session_name} | Failed to get referrals count")
-                    return False
-                if current_refs >= required_refs:
-                    logger.info(f"{self.session_name} | Have enough referrals ({current_refs}/{required_refs})")
-                    completion_id = await self.start_task(task_id, task_type)
-                    if not completion_id:
-                        logger.error(f"{self.session_name} | Failed to start referral task")
-                        return False
-                    await asyncio.sleep(random.uniform(2, 4))
-                    max_attempts = 10
-                    for attempt in range(max_attempts):
-                        current_tasks = await self.get_current_tasks()
-                        if current_tasks:
-                            for current_task in current_tasks:
-                                if current_task['id'] == completion_id:
-                                    if current_task['status'] == 'COMPLETED':
-                                        logger.success(f"{self.session_name} | Referral task completed, claiming reward")
-                                        received_reward = await self.claim_task_reward(completion_id)
-                                        return received_reward > 0
-                                    logger.info(f"{self.session_name} | Task status: {current_task['status']}, waiting...")
-                        await asyncio.sleep(random.uniform(3, 5))
-                    logger.error(f"{self.session_name} | Task completion timeout exceeded")
-                    return False
-                else:
-                    logger.info(f"{self.session_name} | Not enough referrals ({current_refs}/{required_refs})")
+                if current_refs is None or current_refs < required_refs:
                     return False
             except ValueError:
-                logger.error(f"{self.session_name} | Failed to parse required referrals count from title: {title}")
                 return False
-        await asyncio.sleep(random.uniform(5, 10))
-        current_tasks = await self.get_current_tasks()
-        if current_tasks:
-            for current_task in current_tasks:
-                if current_task['taskId'] == task_id:
-                    status = current_task['status']
-                    logger.info(f"{self.session_name} | Current task status: {status}")
-                    
-                    if status == 'CLAIMED':
-                        logger.info(f"{self.session_name} | Task already completed and reward claimed")
-                        return True
-                    elif status == 'COMPLETED':
-                        logger.info(f"{self.session_name} | Task already completed, claiming reward")
-                        received_reward = await self.claim_task_reward(current_task['id'])
-                        return received_reward > 0
-                    elif status == 'PENDING':
-                        logger.info(f"{self.session_name} | Task already started, verifying")
-                        
-                        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
-                            channel_id = task['telegramChannelId']
-                            channel_url = task['link']
-                            
-                            if not await self.join_telegram_channel(channel_id, channel_url):
-                                logger.error(f"{self.session_name} | Failed to subscribe to channel {channel_url}")
-                                return False
-                                
-                            await asyncio.sleep(random.uniform(2, 4))
-                            
-                            if not await self.verify_task(current_task['id'], task_type, channel_id):
-                                logger.error(f"{self.session_name} | Failed to verify task")
-                                return False
 
-                        max_attempts = 10
-                        for attempt in range(max_attempts):
-                            await asyncio.sleep(random.uniform(3, 5))
-                            check_tasks = await self.get_current_tasks()
-                            if check_tasks:
-                                for check_task in check_tasks:
-                                    if check_task['id'] == current_task['id']:
-                                        if check_task['status'] == 'COMPLETED':
-                                            logger.success(f"{self.session_name} | Task completed, claiming reward")
-                                            received_reward = await self.claim_task_reward(check_task['id'])
-                                            return received_reward > 0
-                                        logger.info(f"{self.session_name} | Task status: {check_task['status']}, waiting...")
-                    
-                        logger.error(f"{self.session_name} | Task completion timeout exceeded")
-                        return False
-
-        logger.info(f"{self.session_name} | Starting new task {task_id}")
-        completion_id = await self.start_task(task_id, task_type)
-        if not completion_id:
-            logger.error(f"{self.session_name} | Failed to start task")
+        await asyncio.sleep(random.uniform(5, 8))
+        
+        if not await self.verify_task(completion_id, task_type):
             return False
             
         await asyncio.sleep(random.uniform(5, 8))
-
-        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
-            channel_id = task['telegramChannelId']
-            channel_url = task['link']
+        
+        received_reward = await self.claim_task_reward(completion_id)
+        if received_reward > 0:
+            logger.success(f"{self.session_name} | Received {received_reward} NUTS")
+            await asyncio.sleep(random.uniform(8, 12))
+            return True
             
-            if not await self.join_telegram_channel(channel_id, channel_url):
-                logger.error(f"{self.session_name} | Failed to subscribe to channel {channel_url}")
-                return False
-                
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            if not await self.verify_task(completion_id, task_type, channel_id):
-                logger.error(f"{self.session_name} | Failed to verify task")
-                return False
-                        
-        max_attempts = 10
-        for attempt in range(max_attempts):
-            await asyncio.sleep(random.uniform(5, 8)) 
-            current_tasks = await self.get_current_tasks()
-            if current_tasks:
-                for current_task in current_tasks:
-                    if current_task['id'] == completion_id:
-                        if current_task['status'] == 'COMPLETED':
-                            logger.success(f"{self.session_name} | Task completed, claiming reward")
-                            await asyncio.sleep(random.uniform(2, 4))
-                            received_reward = await self.claim_task_reward(completion_id)
-                            return received_reward > 0
-                        logger.info(f"{self.session_name} | Task status: {current_task['status']}, waiting...")
-                            
-        logger.error(f"{self.session_name} | Task completion timeout exceeded")
         return False
 
     async def start_task(self, task_id: str, task_type: str) -> str | None:
         data = {
             "taskId": task_id,
             "type": task_type,
-            "lang": "RU"
+            "lang": self._get_language()
         }
         
         result = await self._make_request(
             'POST',
             'task/start',
-            headers={
-                'Origin': self.settings.BASE_URL.rstrip('/'),
-                'Content-Type': 'application/json',
-                'Referer': f'{self.settings.BASE_URL}tasks'
-            },
+            headers=get_task_headers(self.proxy_country),
             json=data
         )
         
         if result:
             completion_id = result.get('id')
             if completion_id:
-                logger.success(f"{self.session_name} | Task {task_id} started successfully")
                 return completion_id
-            logger.error(f"{self.session_name} | Failed to get task ID")
         return None
-
-    async def verify_task(self, user_task_id: str, task_type: str, telegram_channel_id: int = None) -> bool:
-        data = {
-            "userTaskId": user_task_id,
-            "type": task_type
-        }
-        
-        if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION':
-            data["telegramChannelId"] = telegram_channel_id
-        elif task_type == 'URL':
-            pass
-            
-        result = await self._make_request(
-            'POST',
-            'task/verify',
-            headers={
-                'Origin': self.settings.BASE_URL.rstrip('/'),
-                'Content-Type': 'application/json',
-                'Referer': f'{self.settings.BASE_URL}tasks'
-            },
-            json=data
-        )
-        
-        if result:
-            status = result.get('status')
-            if status == 'VERIFYING':
-                logger.success(f"{self.session_name} | Task sent for verification")
-                return True
-            logger.error(f"{self.session_name} | Unexpected verification status: {status}")
-        return False
 
     async def claim_start_bonus(self) -> bool:
         result = await self._make_request(
@@ -831,7 +808,16 @@ class Tapper:
         result = await self._make_request(
             'POST',
             f'task/claim/{completion_id}',
-            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
+            headers={
+                'accept': '*/*',
+                'accept-language': 'ru',
+                'content-type': 'application/json',
+                'origin': 'https://nutsfarm.crypton.xyz',
+                'referer': 'https://nutsfarm.crypton.xyz/',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-site'
+            }
         )
         
         if isinstance(result, (int, float)):
@@ -847,8 +833,7 @@ class Tapper:
         settings = Settings()
         url = f"{settings.BASE_URL}api/{settings.API_VERSION}/auth/login"
         headers = self.get_headers()
-        headers['Origin'] = settings.BASE_URL.rstrip('/')
-        headers['Content-Type'] = 'text/plain;charset=UTF-8'
+        headers['content-type'] = 'text/plain;charset=UTF-8'
         
         try:
             async with ClientSession() as session:
@@ -867,6 +852,7 @@ class Tapper:
                     
                     if auth_result.get('accessToken'):
                         self.token = auth_result['accessToken']
+                        self.refresh_token = auth_result.get('refreshToken')
                         logger.success(f"{self.session_name} | Successful authorization")
                         return True
                     else:
@@ -877,23 +863,61 @@ class Tapper:
             logger.error(f"{self.session_name} | Error during authorization: {str(error)}")
             return False
 
+    async def refresh_access_token(self) -> bool:
+        if not self.refresh_token:
+            return False
+            
+        settings = Settings()
+        url = f"{settings.BASE_URL}api/{settings.API_VERSION}/auth/token"
+        headers = {
+            'accept': '*/*',
+            'accept-language': 'ru,en-US;q=0.9,en;q=0.8',
+            'cache-control': 'no-cache',
+            'content-type': 'application/json',
+            'dnt': '1',
+            'origin': 'https://nutsfarm.crypton.xyz',
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
+            'referer': 'https://nutsfarm.crypton.xyz/',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'user-agent': self.user_agent
+        }
+        
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    url=url,
+                    headers=headers,
+                    json={"refreshToken": self.refresh_token},
+                    ssl=False
+                ) as response:
+                    response.raise_for_status()
+                    auth_result = await response.json()
+                    
+                    if auth_result.get('accessToken'):
+                        self.token = auth_result['accessToken']
+                        self.refresh_token = auth_result.get('refreshToken')
+                        logger.success(f"{self.session_name} | Successfully refreshed access token")
+                        return True
+                    else:
+                        logger.error(f"{self.session_name} | Token refresh failed: invalid response format")
+                        return False
+                        
+        except Exception as error:
+            logger.error(f"{self.session_name} | Error refreshing token: {str(error)}")
+            return False
+
     async def register(self, auth_data: str, referral_code: str = None) -> bool:
         settings = Settings()
         base_url = settings.BASE_URL.rstrip('/')
         url = f"{base_url}/api/{settings.API_VERSION}/auth/register"
-        headers = {
-            'Host': base_url.replace('https://', ''),
-            'Accept': '*/*',
-            'Sec-Fetch-Site': 'same-origin',
-            'Accept-Language': 'ru',
-            'Sec-Fetch-Mode': 'cors',
-            'Origin': base_url,
-            'User-Agent': self.user_agent,
-            'Referer': f'{base_url}/?startapp=ref_nutsfarm_bot&tgWebAppStartParam=ref_{referral_code}' if referral_code else f'{base_url}/',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Content-Type': 'application/json'
-        }
+        headers = self.get_headers()
+        headers['content-type'] = 'application/json'
         
         if not referral_code and 'start_param=' in auth_data:
             try:
@@ -905,7 +929,7 @@ class Tapper:
         
         data = {
             "authData": auth_data,
-            "language": "RU"
+            "language": self._get_language()
         }
         
         if referral_code:
@@ -926,6 +950,7 @@ class Tapper:
                     
                     if auth_result.get('accessToken'):
                         self.token = auth_result['accessToken']
+                        self.refresh_token = auth_result.get('refreshToken')
                         logger.success(f"{self.session_name} | Successful registration")
                         return True
                     else:
@@ -1035,7 +1060,7 @@ class Tapper:
         result = await self._make_request(
             'POST',
             f'story/read/{story_id}',
-            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
+            headers={'Origin': 'https://nutsfarm.crypton.xyz'}
         )
         
         if isinstance(result, (int, float)):
@@ -1085,7 +1110,11 @@ class Tapper:
         return None
     
     async def claim_referral_reward(self) -> float | None:
-        result = await self._make_request('POST', 'user/current/referrals/claim', headers={'Origin': self.settings.BASE_URL.rstrip('/')})
+        result = await self._make_request(
+            'POST', 
+            'user/current/referrals/claim',
+            headers={'Origin': 'https://nutsfarm.crypton.xyz'}
+        )
         if isinstance(result, (int, float)):
             logger.success(f"{self.session_name} | Referral reward claimed: {result}")
             return float(result)
@@ -1131,7 +1160,7 @@ class Tapper:
         result = await self._make_request(
             'GET',
             'learn/active',
-            params={'lang': 'RU'}
+            params={'lang': self._get_language()}
         )
         if not result:
             return []
@@ -1154,7 +1183,7 @@ class Tapper:
         result = await self._make_request(
             'POST',
             f'learn/claim/{lesson_id}',
-            headers={'Origin': self.settings.BASE_URL.rstrip('/')}
+            headers={'Origin': 'https://nutsfarm.crypton.xyz'}
         )
         if isinstance(result, (int, float)):
             reward = int(result)
