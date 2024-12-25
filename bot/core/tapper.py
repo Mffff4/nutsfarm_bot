@@ -643,24 +643,59 @@ class Tapper:
     async def verify_task(self, user_task_id: str, task_type: str, telegram_channel_id: int = None) -> bool:
         data = {
             "userTaskId": user_task_id,
-            "type": task_type
+            "type": task_type,
+            "lang": self._get_language()
         }
         
         if task_type == 'TELEGRAM_CHANNEL_SUBSCRIPTION' and telegram_channel_id:
             data["telegramChannelId"] = telegram_channel_id
             
-        result = await self._make_request(
-            'POST',
-            'task/verify',
-            headers=get_task_headers(),
-            json=data
-        )
-        
-        if result:
-            status = result.get('status')
-            if status in ['VERIFYING', 'FARMING', 'COMPLETED']:
-                return True
-            logger.error(f"{self.session_name} | Verification failed: {status}")
+        if task_type == 'LEARN_LESSON':
+            result = await self._make_request(
+                'POST',
+                'task/verify',
+                headers=get_task_headers(self.proxy_country),
+                json=data
+            )
+            
+            if result:
+                status = result.get('status')
+                if status in ['VERIFYING', 'FARMING', 'COMPLETED']:
+                    for attempt in range(3):
+                        await asyncio.sleep(5)
+                        current_tasks = await self.get_current_tasks()
+                        if not current_tasks:
+                            continue
+                            
+                        current_task = next((t for t in current_tasks if t['id'] == user_task_id), None)
+                        if not current_task:
+                            continue
+                            
+                        current_status = current_task.get('status')
+                        logger.info(f"{self.session_name} | Verification status: {current_status}")
+                        
+                        if current_status == 'COMPLETED':
+                            return True
+                            
+                    return False
+                    
+                logger.error(f"{self.session_name} | Verification failed: {status}")
+                return False
+                
+        else:
+            result = await self._make_request(
+                'POST',
+                'task/verify',
+                headers=get_task_headers(self.proxy_country),
+                json=data
+            )
+            
+            if result:
+                status = result.get('status')
+                if status in ['VERIFYING', 'FARMING', 'COMPLETED']:
+                    return True
+                logger.error(f"{self.session_name} | Verification failed: {status}")
+                
         return False
 
     async def complete_task(self, task: dict) -> bool:
@@ -669,53 +704,60 @@ class Tapper:
         task_id = task_info['id']
         title = task['title']
         reward = task_info['reward']
-        status = task.get('status', '')
 
         logger.info(f"{self.session_name} | Task: {title} | {task_type} | {reward} NUTS")
-
-        if status == 'CLAIMED':
-            logger.info(f"{self.session_name} | Task already claimed")
-            return True
-            
-        elif status == 'COMPLETED':
-            received_reward = await self.claim_task_reward(task['id'])
-            if received_reward > 0:
-                logger.success(f"{self.session_name} | Received {received_reward} NUTS")
-                await asyncio.sleep(random.uniform(8, 12))
-                return True
-            return False
-            
-        elif status == 'VERIFYING':
-            for attempt in range(3):
-                await asyncio.sleep(5)
+        
+        current_tasks = await self.get_current_tasks()
+        if current_tasks:
+            current_task = next((t for t in current_tasks if t['taskId'] == task_id), None)
+            if current_task:
+                status = current_task['status']
+                logger.info(f"{self.session_name} | Current task status: {status}")
                 
-                current_tasks = await self.get_current_tasks()
-                if not current_tasks:
-                    continue
+                if status == 'CLAIMED':
+                    logger.info(f"{self.session_name} | Task already claimed")
+                    return True
                     
-                current_task = next((t for t in current_tasks if t['id'] == task['id']), None)
-                if not current_task:
-                    continue
-                    
-                current_status = current_task.get('status')
-                
-                if current_status == 'COMPLETED':
-                    received_reward = await self.claim_task_reward(task['id'])
+                elif status == 'COMPLETED':
+                    received_reward = await self.claim_task_reward(current_task['id'])
                     if received_reward > 0:
                         logger.success(f"{self.session_name} | Received {received_reward} NUTS")
                         await asyncio.sleep(random.uniform(8, 12))
                         return True
-                elif current_status == 'CLAIMED':
-                    return True
+                    return False
                     
-            logger.error(f"{self.session_name} | Verification timeout")
-            return False
-            
-        elif status == 'PENDING':
-            if not await self.verify_task(task['id'], task_type, task.get('telegramChannelId')):
-                return False
-            await asyncio.sleep(random.uniform(5, 8))
-            return True
+                elif status == 'VERIFYING':
+                    logger.info(f"{self.session_name} | Task is being verified")
+                    for attempt in range(3):
+                        await asyncio.sleep(5)
+                        updated_tasks = await self.get_current_tasks()
+                        if not updated_tasks:
+                            continue
+                            
+                        updated_task = next((t for t in updated_tasks if t['taskId'] == task_id), None)
+                        if not updated_task:
+                            continue
+                            
+                        updated_status = updated_task.get('status')
+                        logger.info(f"{self.session_name} | Updated task status: {updated_status}")
+                        
+                        if updated_status == 'COMPLETED':
+                            received_reward = await self.claim_task_reward(updated_task['id'])
+                            if received_reward > 0:
+                                logger.success(f"{self.session_name} | Received {received_reward} NUTS")
+                                await asyncio.sleep(random.uniform(8, 12))
+                                return True
+                        elif updated_status == 'CLAIMED':
+                            return True
+                            
+                    logger.error(f"{self.session_name} | Verification timeout")
+                    return False
+                    
+                elif status == 'PENDING':
+                    if not await self.verify_task(current_task['id'], task_type, task.get('telegramChannelId')):
+                        return False
+                    await asyncio.sleep(random.uniform(5, 8))
+                    return True
 
         completion_id = await self.start_task(task_id, task_type)
         if not completion_id:
@@ -883,7 +925,6 @@ class Tapper:
             logger.success(f"{self.session_name} | Token successfully refreshed")
             return True
             
-        logger.error(f"{self.session_name} | Failed to refresh token")
         return False
 
     async def register(self, auth_data: str, referral_code: str = None) -> bool:
