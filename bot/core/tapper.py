@@ -377,14 +377,18 @@ class Tapper:
         claimed_task_ids = []
         verified_tasks = []
         verifying_task_ids = []
+        completed_lesson_tasks = []
         
         if current_tasks:
             for current_task in current_tasks:
                 task_id = current_task['taskId']
                 status = current_task['status']
+                task_type = current_task.get('type')
                 
                 if status == 'CLAIMED':
                     claimed_task_ids.append(task_id)
+                    if task_type == 'LEARN_LESSON':
+                        completed_lesson_tasks.append(task_id)
                 elif status == 'COMPLETED':
                     original_task = next((t for t in tasks if t['task']['id'] == task_id), None)
                     if original_task:
@@ -393,8 +397,12 @@ class Tapper:
                             'id': current_task['id'],
                             'status': 'COMPLETED'
                         })
+                        if task_type == 'LEARN_LESSON':
+                            completed_lesson_tasks.append(task_id)
                 elif status == 'VERIFYING':
                     verifying_task_ids.append(task_id)
+                    if task_type == 'LEARN_LESSON':
+                        completed_lesson_tasks.append(task_id)
         
         filtered_tasks = []
         learn_tasks = []
@@ -449,6 +457,17 @@ class Tapper:
                 )
                 task_number += 1
                 continue
+                
+            if task_type == 'LEARN_LESSON' and task_id in completed_lesson_tasks:
+                table.add_row(
+                    str(task_number),
+                    title,
+                    task_type,
+                    str(reward),
+                    "[green]✓ Completed[/green]"
+                )
+                task_number += 1
+                continue
             
             status = ""
             
@@ -458,6 +477,16 @@ class Tapper:
                     
                 tasks_to_complete += 1
                 if task_type == 'LEARN_LESSON':
+                    # Проверяем, есть ли незавершенные задания с меньшим количеством уроков
+                    required_lessons = int(''.join(filter(str.isdigit, title)))
+                    has_lower_lessons = any(
+                        int(''.join(filter(str.isdigit, t['title']))) < required_lessons
+                        for t in tasks
+                        if t['task']['type'] == 'LEARN_LESSON' and t['task']['id'] not in completed_lesson_tasks
+                    )
+                    if has_lower_lessons:
+                        continue
+                        
                     learn_tasks.append(task)
                     status = "[yellow]In queue (Lesson)[/yellow]"
                 else:
