@@ -390,7 +390,8 @@ class Tapper:
                     if original_task:
                         verified_tasks.append({
                             **original_task,
-                            'completion_id': current_task['id']
+                            'id': current_task['id'],
+                            'status': 'COMPLETED'
                         })
                 elif status == 'VERIFYING':
                     verifying_task_ids.append(task_id)
@@ -673,6 +674,7 @@ class Tapper:
         logger.info(f"{self.session_name} | Task: {title} | {task_type} | {reward} NUTS")
 
         if status == 'CLAIMED':
+            logger.info(f"{self.session_name} | Task already claimed")
             return True
             
         elif status == 'COMPLETED':
