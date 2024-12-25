@@ -867,50 +867,22 @@ class Tapper:
         if not self.refresh_token:
             return False
             
-        settings = Settings()
-        url = f"{settings.BASE_URL}api/{settings.API_VERSION}/auth/token"
-        headers = {
-            'accept': '*/*',
-            'accept-language': 'ru,en-US;q=0.9,en;q=0.8',
-            'cache-control': 'no-cache',
-            'content-type': 'application/json',
-            'dnt': '1',
-            'origin': 'https://nutsfarm.crypton.xyz',
-            'pragma': 'no-cache',
-            'priority': 'u=1, i',
-            'referer': 'https://nutsfarm.crypton.xyz/',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"macOS"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site',
-            'user-agent': self.user_agent
-        }
+        result = await self._make_request(
+            'POST',
+            'auth/token',
+            headers=get_auth_headers(self.proxy_country),
+            json={"refreshToken": self.refresh_token},
+            with_auth=False
+        )
         
-        try:
-            async with ClientSession() as session:
-                async with session.post(
-                    url=url,
-                    headers=headers,
-                    json={"refreshToken": self.refresh_token},
-                    ssl=False
-                ) as response:
-                    response.raise_for_status()
-                    auth_result = await response.json()
-                    
-                    if auth_result.get('accessToken'):
-                        self.token = auth_result['accessToken']
-                        self.refresh_token = auth_result.get('refreshToken')
-                        logger.success(f"{self.session_name} | Successfully refreshed access token")
-                        return True
-                    else:
-                        logger.error(f"{self.session_name} | Token refresh failed: invalid response format")
-                        return False
-                        
-        except Exception as error:
-            logger.error(f"{self.session_name} | Error refreshing token: {str(error)}")
-            return False
+        if result and result.get('accessToken'):
+            self.token = result['accessToken']
+            self.refresh_token = result.get('refreshToken')
+            logger.success(f"{self.session_name} | Токен успешно обновлен")
+            return True
+            
+        logger.error(f"{self.session_name} | Не удалось обновить токен")
+        return False
 
     async def register(self, auth_data: str, referral_code: str = None) -> bool:
         settings = Settings()
