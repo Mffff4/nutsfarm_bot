@@ -880,10 +880,10 @@ class Tapper:
         if result and result.get('accessToken'):
             self.token = result['accessToken']
             self.refresh_token = result.get('refreshToken')
-            logger.success(f"{self.session_name} | Токен успешно обновлен")
+            logger.success(f"{self.session_name} | Token successfully refreshed")
             return True
             
-        logger.error(f"{self.session_name} | Не удалось обновить токен")
+        logger.error(f"{self.session_name} | Failed to refresh token")
         return False
 
     async def register(self, auth_data: str, referral_code: str = None) -> bool:
