@@ -73,3 +73,17 @@ def get_proxy_check_headers(country: Optional[str] = None) -> Dict[str, str]:
         'sec-fetch-mode': 'cors',
         'sec-fetch-site': 'same-site'
     }
+
+def get_referral_headers(proxy_country: str = None) -> dict:
+    """Возвращает заголовки для запросов к реферальному API"""
+    return {
+        'accept': '*/*',
+        'accept-language': 'ru,en-US;q=0.9,en;q=0.8' if not proxy_country or proxy_country == 'RU' else 'en-US,en;q=0.9',
+        'cache-control': 'no-cache',
+        'origin': 'https://nutsfarm.crypton.xyz',
+        'pragma': 'no-cache',
+        'referer': 'https://nutsfarm.crypton.xyz/',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
+    }

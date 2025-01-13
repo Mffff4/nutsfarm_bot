@@ -2,8 +2,9 @@
 
 [🇺🇸 English](README.md)
 
-[![Bot Link](https://img.shields.io/badge/Telegram_Бот-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/nutsfarm_bot/nutscoin?startapp=ref_DTGYWCIWEZSAGUB)
-[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Ссылка-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+d0sLjg42kJgxZTM6)
+[<img src="https://res.cloudinary.com/dkgz59pmw/image/upload/v1736756459/knpk224-28px-market_ksivis.svg" alt="Market Link" width="200">](https://t.me/MaineMarketBot?start=8HVF7S9K)
+[<img src="https://res.cloudinary.com/dkgz59pmw/image/upload/v1736756459/knpk224-28px-channel_psjoqn.svg" alt="Channel Link" width="200">](https://t.me/+vpXdTJ_S3mo0ZjIy)
+[<img src="https://res.cloudinary.com/dkgz59pmw/image/upload/v1736756459/knpk224-28px-chat_ixoikd.svg" alt="Chat Link" width="200">](https://t.me/+wWQuct9bljQ0ZDA6)
 
 ---
 

@@ -35,7 +35,8 @@ from bot.core.headers import (
     get_task_headers,
     get_farming_headers,
     get_auth_headers,
-    get_proxy_check_headers
+    get_proxy_check_headers,
+    get_referral_headers
 )
 from rich.table import Table
 
@@ -1107,14 +1108,22 @@ class Tapper:
             logger.info(f"{self.session_name} | Total story rewards: {total_reward}")
 
     async def get_referral_reward_amount(self) -> float | None:
-        result = await self._make_request('GET', 'user/current/referrals/amount')
+        result = await self._make_request(
+            'GET', 
+            'user/current/referrals/amount',
+            headers=get_referral_headers(self.proxy_country)
+        )
         if isinstance(result, (int, float)):
             logger.info(f"{self.session_name} | Available referral reward: {result}")
             return float(result)
         return None
     
     async def get_referral_claim_time(self) -> datetime | None:
-        result = await self._make_request('GET', 'user/current/referrals/time')
+        result = await self._make_request(
+            'GET', 
+            'user/current/referrals/time',
+            headers=get_referral_headers(self.proxy_country)
+        )
         if isinstance(result, str):
             try:
                 claim_time = datetime.fromisoformat(result.replace('Z', '+00:00'))
@@ -1128,7 +1137,7 @@ class Tapper:
         result = await self._make_request(
             'POST', 
             'user/current/referrals/claim',
-            headers={'Origin': 'https://nutsfarm.crypton.xyz'}
+            headers=get_referral_headers(self.proxy_country)
         )
         if isinstance(result, (int, float)):
             logger.success(f"{self.session_name} | Referral reward claimed: {result}")
@@ -1141,18 +1150,25 @@ class Tapper:
             if not reward_amount or reward_amount <= 0:
                 logger.info(f"{self.session_name} | No referral reward available")
                 return False
+                
             claim_time = await self.get_referral_claim_time()
             if not claim_time:
                 return False
+                
             current_time = datetime.now(timezone.utc)
             if current_time < claim_time:
                 time_left = (claim_time - current_time).total_seconds()
                 hours = int(time_left // 3600)
                 minutes = int((time_left % 3600) // 60)
                 logger.info(f"{self.session_name} | Referral reward will be available in {hours}h {minutes}m")
+                
+                next_run = claim_time + timedelta(minutes=1)
+                logger.info(f"{self.session_name} | Next referral claim attempt scheduled at {next_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                 return False
+                
             claimed_amount = await self.claim_referral_reward()
             return claimed_amount is not None and claimed_amount > 0
+            
         except Exception as e:
             logger.error(f"{self.session_name} | Error checking referral reward: {str(e)}")
             return False
