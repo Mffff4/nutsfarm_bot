@@ -25,6 +25,7 @@ from bot.core.user_agents import load_or_generate_user_agent
 from bot.exceptions import InvalidSession
 from aiohttp import ClientResponseError, ClientSession, ClientTimeout, BasicAuth
 import json
+from aiohttp_socks import ProxyConnector
 
 from pyrogram import raw
 from bot.utils.logger import logger
@@ -176,48 +177,52 @@ class Tapper:
             return True
             
         try:
-            headers = {
-                'Host': 'speed.cloudflare.com',
-                'Accept': 'application/json, text/plain, */*',
-                'Origin': self.settings.BASE_URL.rstrip('/'),
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'cross-site',
-                'User-Agent': self.user_agent,
-                'Referer': f'{self.settings.BASE_URL}',
-                'Sec-Fetch-Dest': 'empty',
-                'Accept-Language': 'ru'
-            }
+            headers = get_proxy_check_headers(self.user_agent)
             
-            async with ClientSession() as session:
-                proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
-                proxy_auth = None
-                if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
-                    proxy_auth = BasicAuth(self.proxy_dict['username'], self.proxy_dict['password'])
+            proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+            if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
+                proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['username']}:{self.proxy_dict['password']}@{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+            
+            connector = ProxyConnector.from_url(proxy_url)
                     
-                async with session.get(
-                    'https://speed.cloudflare.com/meta',
-                    headers=headers,
-                    proxy=proxy_url,
-                    proxy_auth=proxy_auth,
-                    ssl=False,
-                    timeout=10
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self.proxy_country = data.get('country')
+            async with ClientSession(connector=connector) as session:
+                endpoints = [
+                    'http://ip-api.com/json', 
+                    'https://ipinfo.io/json', 
+                    'https://speed.cloudflare.com/meta'
+                ]
+                
+                for endpoint in endpoints:
+                    try:
+                        async with session.get(
+                            endpoint,
+                            headers=headers,
+                            ssl=False,
+                            timeout=ClientTimeout(total=15)
+                        ) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                if 'country' in data:
+                                    self.proxy_country = data['country']
+                                elif 'countryCode' in data:
+                                    self.proxy_country = data['countryCode']
+                                    
+                                if settings.LOG_PROXY_CHECK:
+                                    logger.info(
+                                        f"{self.session_name} | "
+                                        f"Proxy check successful via {endpoint} | "
+                                        f"Country: {self.proxy_country}"
+                                    )
+                                return True
+                    except Exception as e:
                         if settings.LOG_PROXY_CHECK:
-                            logger.info(
-                                f"{self.session_name} | "
-                                f"Proxy check successful | "
-                                f"IP: {data.get('clientIp')} | "
-                                f"Location: {data.get('city')}, {self.proxy_country} | "
-                                f"ISP: {data.get('asOrganization')}"
-                            )
-                        return True
-                    if settings.LOG_PROXY_CHECK:
-                        logger.warning(f"{self.session_name} | Proxy check failed with status {response.status}")
-                    return False
+                            logger.debug(f"{self.session_name} | Failed to check proxy via {endpoint}: {str(e)}")
+                        continue
+                        
+                if settings.LOG_PROXY_CHECK:
+                    logger.warning(f"{self.session_name} | All proxy check endpoints failed")
+                return False
+                
         except Exception as e:
             if settings.LOG_PROXY_CHECK:
                 logger.warning(f"{self.session_name} | Proxy check failed: {str(e)}")
@@ -249,7 +254,15 @@ class Tapper:
         
         while retry_count < settings.MAX_RETRIES:
             try:
-                async with ClientSession() as session:
+                proxy_url = None
+                if self.proxy_dict:
+                    proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+                    if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
+                        proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['username']}:{self.proxy_dict['password']}@{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
+                
+                connector = ProxyConnector.from_url(proxy_url) if proxy_url else None
+                
+                async with ClientSession(connector=connector) as session:
                     timeout = random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1])
                     
                     request_kwargs = {
@@ -259,15 +272,6 @@ class Tapper:
                         'timeout': ClientTimeout(total=timeout),
                         **kwargs
                     }
-
-                    if self.proxy_dict:
-                        proxy_url = f"{self.proxy_dict['scheme']}://{self.proxy_dict['hostname']}:{self.proxy_dict['port']}"
-                        request_kwargs['proxy'] = proxy_url
-                        if self.proxy_dict.get('username') and self.proxy_dict.get('password'):
-                            request_kwargs['proxy_auth'] = BasicAuth(
-                                self.proxy_dict['username'],
-                                self.proxy_dict['password']
-                            )
                     
                     async with getattr(session, method.lower())(**request_kwargs) as response:
                         if response.status in [401, 403]:
