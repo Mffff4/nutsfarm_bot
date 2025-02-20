@@ -856,23 +856,30 @@ class Tapper:
     async def claim_task_reward(self, completion_id: str) -> int:
         result = await self._make_request(
             'POST',
-            f'task/claim/{completion_id}',
+            'task/claim',
             headers={
                 'accept': '*/*',
                 'accept-language': 'ru',
                 'content-type': 'application/json',
                 'origin': 'https://nutsfarm.crypton.xyz',
-                'referer': 'https://nutsfarm.crypton.xyz/',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-site'
+                'referer': 'https://nutsfarm.crypton.xyz/'
+            },
+            json={
+                "userTaskId": completion_id,
+                "type": "URL"  # Тип задания будет определяться автоматически на сервере
             }
         )
         
-        if isinstance(result, (int, float)):
-            logger.success(f"{self.session_name} | Reward claimed: {result}")
-            return int(result)
-        logger.error(f"{self.session_name} | Invalid reward format: {result}")
+        if isinstance(result, dict):
+            task = result.get('task', {})
+            reward = task.get('reward', 0)
+            if reward > 0:
+                logger.success(f"{self.session_name} | Reward claimed: {reward}")
+                return reward
+            else:
+                logger.error(f"{self.session_name} | No reward in response")
+        else:
+            logger.error(f"{self.session_name} | Invalid reward format: {result}")
         return 0
 
     async def get_current_tasks(self) -> list | None:
